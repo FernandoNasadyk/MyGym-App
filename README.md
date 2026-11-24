@@ -7,9 +7,9 @@ App personal para seguir una rutina de gimnasio. Corre con **Expo + React Native
 - **Pantalla de inicio = entrenar**: muestra solo la rutina del día de hoy (si hoy es miércoles, aparece el día Miércoles). Cargás kg y repeticiones de cada serie y, cuando completás todos los ejercicios, aparece **Finalizar entrenamiento de hoy**, que guarda toda la sesión de una vez.
 - **Día de descanso**: si hoy no tenés rutina, la pantalla lo dice y te deja elegir otro día para entrenar igual.
 - **Rutinas** (Ajustes → Rutinas): crear, renombrar, mover y eliminar días (un día por día de la semana, más días Extra), con su calentamiento editable y sus ejercicios en orden.
-- **Catálogo de ejercicios** con series por defecto, rango de repeticiones y salto de peso; baja lógica que no borra el historial.
+- **Catálogo de ejercicios** con series por defecto, rango de repeticiones y peso inicial (se precarga al entrenar); baja lógica que no borra el historial.
 - **Historial completo** con filtro por ejercicio, totales (sesiones, series, volumen, mejor peso) y carga de a 10 sesiones.
-- **Sugerencia de progresión**: si cumplís el máximo de reps con el mismo peso durante 1 o 2 semanas (configurable en Ajustes), te propone subir el peso.
+- **Sugerencia de progresión**: si cumplís el máximo de reps con el mismo peso y pasó el período de 1 o 2 semanas (configurable en Ajustes), te propone subir el peso en saltos fijos de 2,5 kg.
 - La próxima sesión precarga los últimos pesos y muestra qué hiciste la última vez.
 
 ## Navegación
@@ -65,7 +65,7 @@ scripts/test-db.mjs      tests con node:sqlite
 | Tabla | Para qué |
 | --- | --- |
 | `routines` | días y su calentamiento |
-| `exercises` | catálogo (nombre, series, reps, salto de peso) |
+| `exercises` | catálogo (nombre, series, reps, peso inicial) |
 | `routine_exercises` | qué ejercicio va en qué día y en qué orden |
 | `workout_sessions` | una sesión por día y fecha |
 | `set_logs` | cada serie registrada (kg y reps) |
@@ -74,7 +74,7 @@ scripts/test-db.mjs      tests con node:sqlite
 ## Chequeos
 
 ```bash
-npm run test:db     # 19 tests de días, entrenamiento, progresión, historial y formato
+npm run test:db     # 26 tests de días, entrenamiento, progresión, RIR, migraciones, historial y formato
 npx tsc --noEmit    # typecheck (también revisa la sintaxis de los .jsx)
 ```
 

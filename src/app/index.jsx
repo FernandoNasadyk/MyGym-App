@@ -21,6 +21,7 @@ import {
 } from '../db/workout';
 import { getDayLabel, getTodayCode } from '../constants/weekdays';
 import { colors, radius, spacing, cardShadow } from '../constants/app-theme';
+import { RIR_OPTIONS, WEIGHT_STEP } from '../constants/training';
 import SettingsDrawer from '../components/settings-drawer';
 import ProgressBar from '../components/progress-bar';
 import WorkoutSummaryModal from '../components/workout-summary-modal';
@@ -34,7 +35,9 @@ import { parseWarmupSteps } from '../utils/warmup';
 import {
   addSet,
   adjustWeight,
+  buildInitialCollapsed,
   buildInitialDrafts,
+  buildInitialRir,
   buildWorkoutEntries,
   countCompleted,
   describeLastSets,
@@ -52,6 +55,7 @@ function ExerciseCard({
   sets,
   lastSets,
   suggestion,
+  rir,
   collapsed,
   onToggle,
   onChangeSet,
@@ -59,6 +63,7 @@ function ExerciseCard({
   onAddSet,
   onRemoveSet,
   onApplySuggestion,
+  onChangeRir,
 }) {
   const complete = isExerciseComplete(sets);
   const filled = sets.filter(isSetFilled).length;
@@ -213,6 +218,45 @@ function ExerciseCard({
               </TouchableOpacity>
             ) : null}
           </View>
+
+          <View style={styles.rirBlock}>
+            <View style={styles.rirHeader}>
+              <Text style={styles.rirLabel}>RIR</Text>
+              <Text style={styles.rirHint}>
+                Repeticiones en reserva (opcional)
+              </Text>
+            </View>
+            <View style={styles.rirChips}>
+              {[null, ...RIR_OPTIONS].map((option) => {
+                const active = (rir ?? null) === option;
+                const label = option === null ? 'Sin RIR' : `RIR ${option}`;
+                return (
+                  <TouchableOpacity
+                    key={label}
+                    style={[styles.rirChip, active && styles.rirChipActive]}
+                    onPress={() => onChangeRir(option)}
+                    activeOpacity={0.8}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={
+                      option === null
+                        ? `${exercise.name}: sin RIR`
+                        : `${exercise.name}: RIR ${option}`
+                    }
+                  >
+                    <Text
+                      style={[
+                        styles.rirChipText,
+                        active && styles.rirChipTextActive,
+                      ]}
+                    >
+                      {label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
         </View>
       )}
     </View>
@@ -236,8 +280,9 @@ export default function IndexScreen() {
   });
   const [drafts, setDrafts] = useState({});
   const [suggestions, setSuggestions] = useState(() => new Map());
+  const [rirByExercise, setRirByExercise] = useState({});
   const [collapsed, setCollapsed] = useState(() => new Set());
-  const [warmupOpen, setWarmupOpen] = useState(false);
+  const [warmupOpen, setWarmupOpen] = useState(true);
 
   const [saving, setSaving] = useState(false);
   const [summary, setSummary] = useState(null);
@@ -253,11 +298,20 @@ export default function IndexScreen() {
   const loadedKeyRef = useRef(null);
   const loadedDateRef = useRef(toISODate());
   const draftsRef = useRef({});
+  const rirRef = useRef({});
 
   const updateDrafts = useCallback((updater) => {
     setDrafts((previous) => {
       const next = typeof updater === 'function' ? updater(previous) : updater;
       draftsRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const updateRir = useCallback((updater) => {
+    setRirByExercise((previous) => {
+      const next = typeof updater === 'function' ? updater(previous) : updater;
+      rirRef.current = next;
       return next;
     });
   }, []);
@@ -306,6 +360,7 @@ export default function IndexScreen() {
           loadedKeyRef.current = null;
           setWorkout({ exercises: [], lastLogs: new Map(), session: null });
           updateDrafts({});
+          updateRir({});
           setSuggestions(new Map());
           return;
         }
@@ -335,16 +390,36 @@ export default function IndexScreen() {
           data.lastLogs,
           data.savedLogs
         );
+        const freshRir = buildInitialRir(data.exercises, data.savedLogs);
         if (reset || !sameWorkout) {
           updateDrafts(fresh);
-          setCollapsed(new Set());
+          updateRir(freshRir);
+          // Al cargar el día: calentamiento y primer ejercicio abiertos, el
+          // resto de los ejercicios contraídos.
+          setCollapsed(buildInitialCollapsed(data.exercises));
+          setWarmupOpen(true);
         } else {
           const previous = draftsRef.current;
+          const previousRir = rirRef.current;
           const merged = {};
-          for (const exercise of data.exercises) {
+          const mergedRir = {};
+          const newlyAdded = [];
+          data.exercises.forEach((exercise, position) => {
+            if (!previous[exercise.id] && position > 0) {
+              newlyAdded.push(exercise.id);
+            }
             merged[exercise.id] = previous[exercise.id] || fresh[exercise.id];
-          }
+            mergedRir[exercise.id] =
+              exercise.id in previousRir
+                ? previousRir[exercise.id]
+                : freshRir[exercise.id];
+          });
           updateDrafts(merged);
+          updateRir(mergedRir);
+          // Un ejercicio sumado mientras estabas en otra pantalla entra contraído.
+          if (newlyAdded.length > 0) {
+            setCollapsed((current) => new Set([...current, ...newlyAdded]));
+          }
         }
       } catch (err) {
         console.error('Error cargando el entrenamiento de hoy:', err);
@@ -353,7 +428,7 @@ export default function IndexScreen() {
         setLoading(false);
       }
     },
-    [updateDrafts]
+    [updateDrafts, updateRir]
   );
 
   useFocusEffect(
@@ -379,7 +454,7 @@ export default function IndexScreen() {
         index === setIndex
           ? {
               ...set,
-              weight: adjustWeight(set.weight, exercise.weight_step, direction),
+              weight: adjustWeight(set.weight, WEIGHT_STEP, direction),
             }
           : set
       ),
@@ -410,6 +485,11 @@ export default function IndexScreen() {
     }));
   };
 
+  const handleChangeRir = (exerciseId, value) => {
+    setStatusMsg(null);
+    updateRir((previous) => ({ ...previous, [exerciseId]: value }));
+  };
+
   const toggleCollapsed = (exerciseId) => {
     setCollapsed((previous) => {
       const next = new Set(previous);
@@ -436,7 +516,11 @@ export default function IndexScreen() {
       const result = await saveWorkout(db, {
         routineId: activeRoutine.id,
         date: loadedDateRef.current,
-        entries: buildWorkoutEntries(workout.exercises, draftsRef.current),
+        entries: buildWorkoutEntries(
+          workout.exercises,
+          draftsRef.current,
+          rirRef.current
+        ),
       });
       setSummary(result);
     } catch (err) {
@@ -710,6 +794,7 @@ export default function IndexScreen() {
               sets={drafts[exercise.id] || []}
               lastSets={workout.lastLogs.get(exercise.id)}
               suggestion={suggestions.get(Number(exercise.id)) ?? null}
+              rir={rirByExercise[exercise.id] ?? null}
               collapsed={collapsed.has(exercise.id)}
               onToggle={() => toggleCollapsed(exercise.id)}
               onChangeSet={(setIndex, field, value) =>
@@ -720,6 +805,7 @@ export default function IndexScreen() {
               }
               onAddSet={() => handleAddSet(exercise.id)}
               onRemoveSet={() => handleRemoveSet(exercise.id)}
+              onChangeRir={(value) => handleChangeRir(exercise.id, value)}
               onApplySuggestion={() =>
                 handleApplySuggestion(
                   exercise.id,
@@ -1227,6 +1313,53 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 12,
     fontWeight: '700',
+  },
+  rirBlock: {
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  rirHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: spacing.sm,
+  },
+  rirLabel: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  rirHint: {
+    flex: 1,
+    color: colors.textFaint,
+    fontSize: 11,
+  },
+  rirChips: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  rirChip: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 9,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceAlt,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  rirChipActive: {
+    backgroundColor: colors.primarySoft,
+    borderColor: colors.primaryBorder,
+  },
+  rirChipText: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  rirChipTextActive: {
+    color: colors.primaryText,
   },
   footnote: {
     color: colors.textFaint,

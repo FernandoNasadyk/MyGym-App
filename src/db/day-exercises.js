@@ -64,10 +64,16 @@ export function normalizeExerciseInput(input = {}) {
     );
   }
 
-  const weightStep = toFloat(input.weightStep);
-  if (!Number.isFinite(weightStep) || weightStep <= 0 || weightStep > 100) {
+  // Peso inicial: opcional. Vacío = 0 (sin peso inicial definido).
+  const rawInitialWeight = String(input.initialWeight ?? '').trim();
+  const initialWeight = rawInitialWeight === '' ? 0 : toFloat(rawInitialWeight);
+  if (
+    !Number.isFinite(initialWeight) ||
+    initialWeight < 0 ||
+    initialWeight > 1000
+  ) {
     throw new Error(
-      'El salto de peso tiene que ser un número mayor a 0 (por ejemplo 2,5).'
+      'El peso inicial tiene que ser un número entre 0 y 1000 kg (por ejemplo 20 o 42,5).'
     );
   }
 
@@ -76,7 +82,7 @@ export function normalizeExerciseInput(input = {}) {
     defaultSets,
     minReps,
     maxReps,
-    weightStep: Math.round(weightStep * 100) / 100,
+    initialWeight: Math.round(initialWeight * 100) / 100,
   };
 }
 
@@ -299,14 +305,14 @@ export async function createExercise(db, input) {
   if (existing) {
     await db.runAsync(
       `UPDATE exercises
-       SET name = ?, default_sets = ?, min_reps = ?, max_reps = ?, weight_step = ?, is_active = 1
+       SET name = ?, default_sets = ?, min_reps = ?, max_reps = ?, initial_weight = ?, is_active = 1
        WHERE id = ?;`,
       [
         data.name,
         data.defaultSets,
         data.minReps,
         data.maxReps,
-        data.weightStep,
+        data.initialWeight,
         existing.id,
       ]
     );
@@ -315,9 +321,15 @@ export async function createExercise(db, input) {
 
   const result = await db.runAsync(
     `INSERT INTO exercises
-     (name, default_sets, min_reps, max_reps, weight_step, is_active)
+     (name, default_sets, min_reps, max_reps, initial_weight, is_active)
      VALUES (?, ?, ?, ?, ?, 1);`,
-    [data.name, data.defaultSets, data.minReps, data.maxReps, data.weightStep]
+    [
+      data.name,
+      data.defaultSets,
+      data.minReps,
+      data.maxReps,
+      data.initialWeight,
+    ]
   );
 
   return { id: result.lastInsertRowId, reactivated: false };
@@ -330,14 +342,14 @@ export async function updateExercise(db, exerciseId, input) {
 
   await db.runAsync(
     `UPDATE exercises
-     SET name = ?, default_sets = ?, min_reps = ?, max_reps = ?, weight_step = ?
+     SET name = ?, default_sets = ?, min_reps = ?, max_reps = ?, initial_weight = ?
      WHERE id = ?;`,
     [
       data.name,
       data.defaultSets,
       data.minReps,
       data.maxReps,
-      data.weightStep,
+      data.initialWeight,
       exerciseId,
     ]
   );

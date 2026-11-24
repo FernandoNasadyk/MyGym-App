@@ -128,8 +128,8 @@ export default function SettingsDrawer({
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Ventana para subir peso</Text>
               <Text style={styles.cardHint}>
-                Cuántas semanas seguidas cumpliendo el máximo de repeticiones
-                hacen que la app te sugiera aumentar el peso.
+                Cuántas semanas tienen que pasar con el mismo peso, llegando al
+                máximo de repeticiones, para que la app te sugiera subir 2,5 kg.
               </Text>
 
               <View style={styles.options}>

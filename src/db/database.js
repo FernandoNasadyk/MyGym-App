@@ -1,6 +1,7 @@
 import * as SQLite from 'expo-sqlite';
 import { SCHEMA_SQL } from './schema';
 import { normalizeAllDayOrders } from './day-exercises';
+import { addMissingColumns } from './migrations';
 
 let dbInstance = null;
 let dbPromise = null;
@@ -21,6 +22,9 @@ async function migrateIfNeeded(db) {
       `ALTER TABLE routines ADD COLUMN warmup TEXT NOT NULL DEFAULT '';`
     );
   }
+
+  // Columnas nuevas (peso inicial del ejercicio y RIR de las series)
+  await addMissingColumns(db);
 
   // Si la tabla exercises tenía routine_id de una versión anterior y routine_exercises está vacía,
   // migramos esos vínculos existentes sin perder datos.

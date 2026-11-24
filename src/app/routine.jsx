@@ -27,6 +27,7 @@ import ExerciseEditorModal from '../components/exercise-editor-modal';
 import ConfirmDialog from '../components/confirm-dialog';
 import RoutineFormModal from '../components/routine-form-modal';
 import { parseWarmupSteps } from '../utils/warmup';
+import { formatInitialWeight } from '../utils/format';
 
 export default function RoutineEditorScreen() {
   const router = useRouter();
@@ -363,7 +364,7 @@ export default function RoutineEditorScreen() {
                       <Text style={styles.pickerItemName}>{item.name}</Text>
                       <Text style={styles.pickerItemMeta}>
                         {item.default_sets} ser · {item.min_reps}–{item.max_reps}{' '}
-                        reps · +{item.weight_step} kg
+                        reps{formatInitialWeight(item.initial_weight)}
                       </Text>
                     </View>
                     <Text style={styles.pickerAddText}>+ Sumar</Text>
@@ -427,7 +428,7 @@ export default function RoutineEditorScreen() {
                       </View>
                       <Text style={styles.exerciseMeta} numberOfLines={1}>
                         {exercise.default_sets} ser · {exercise.min_reps}–
-                        {exercise.max_reps} reps · +{exercise.weight_step} kg
+                        {exercise.max_reps} reps{formatInitialWeight(exercise.initial_weight)}
                       </Text>
                     </TouchableOpacity>
 

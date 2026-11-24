@@ -7,6 +7,8 @@
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { SCHEMA_SQL } from '../src/db/schema.js';
+import { addMissingColumns } from '../src/db/migrations.js';
+import { WEIGHT_STEP } from '../src/constants/training.js';
 import {
   appendExerciseToDay,
   createExercise,
@@ -43,7 +45,9 @@ import {
 import {
   addSet,
   adjustWeight,
+  buildInitialCollapsed,
   buildInitialDrafts,
+  buildInitialRir,
   buildWorkoutEntries,
   countCompleted,
   describeLastSets,
@@ -54,6 +58,7 @@ import {
 } from '../src/utils/workout-draft.js';
 import {
   formatDateShort,
+  formatInitialWeight,
   formatNumber,
   formatRelativeDate,
   formatWeight,
@@ -122,7 +127,7 @@ async function addExercise(db, name, overrides = {}) {
     defaultSets: 2,
     minReps: 6,
     maxReps: 10,
-    weightStep: 2.5,
+    initialWeight: 0,
     ...overrides,
   });
   return id;
@@ -327,7 +332,7 @@ test('validación de datos de ejercicio', () => {
         defaultSets: 2,
         minReps: 6,
         maxReps: 10,
-        weightStep: 2.5,
+        initialWeight: 0,
       }),
     /nombre/
   );
@@ -338,7 +343,7 @@ test('validación de datos de ejercicio', () => {
         defaultSets: 0,
         minReps: 6,
         maxReps: 10,
-        weightStep: 2.5,
+        initialWeight: 0,
       }),
     /series/
   );
@@ -349,7 +354,7 @@ test('validación de datos de ejercicio', () => {
         defaultSets: 2,
         minReps: 12,
         maxReps: 10,
-        weightStep: 2.5,
+        initialWeight: 0,
       }),
     /mínimo/
   );
@@ -360,9 +365,20 @@ test('validación de datos de ejercicio', () => {
         defaultSets: 2,
         minReps: 6,
         maxReps: 10,
-        weightStep: 0,
+        initialWeight: -1,
       }),
-    /salto de peso/
+    /peso inicial/
+  );
+  assert.throws(
+    () =>
+      normalizeExerciseInput({
+        name: 'Press',
+        defaultSets: 2,
+        minReps: 6,
+        maxReps: 10,
+        initialWeight: 'abc',
+      }),
+    /peso inicial/
   );
 
   const normalized = normalizeExerciseInput({
@@ -370,15 +386,36 @@ test('validación de datos de ejercicio', () => {
     defaultSets: '3',
     minReps: '5',
     maxReps: '8',
-    weightStep: '1,25',
+    initialWeight: '42,5',
   });
   assert.deepEqual(normalized, {
     name: 'Press banca',
     defaultSets: 3,
     minReps: 5,
     maxReps: 8,
-    weightStep: 1.25,
+    initialWeight: 42.5,
   });
+
+  // El peso inicial es opcional: vacío o ausente = 0 (sin peso inicial)
+  assert.equal(
+    normalizeExerciseInput({
+      name: 'Press',
+      defaultSets: 2,
+      minReps: 6,
+      maxReps: 10,
+      initialWeight: '',
+    }).initialWeight,
+    0
+  );
+  assert.equal(
+    normalizeExerciseInput({
+      name: 'Press',
+      defaultSets: 2,
+      minReps: 6,
+      maxReps: 10,
+    }).initialWeight,
+    0
+  );
 });
 
 test('no se puede repetir nombre y se puede editar', async () => {
@@ -393,7 +430,7 @@ test('no se puede repetir nombre y se puede editar', async () => {
         defaultSets: 2,
         minReps: 6,
         maxReps: 10,
-        weightStep: 2.5,
+        initialWeight: 0,
       }),
     /ya está en el catálogo/
   );
@@ -403,7 +440,7 @@ test('no se puede repetir nombre y se puede editar', async () => {
     defaultSets: 4,
     minReps: 8,
     maxReps: 12,
-    weightStep: 5,
+    initialWeight: 45,
   });
 
   const updated = await db.getFirstAsync(
@@ -412,7 +449,9 @@ test('no se puede repetir nombre y se puede editar', async () => {
   );
   assert.equal(updated.name, 'Remo con barra');
   assert.equal(Number(updated.default_sets), 4);
-  assert.equal(Number(updated.weight_step), 5);
+  assert.equal(Number(updated.initial_weight), 45);
+  // El salto de peso ya no se edita por ejercicio: la columna queda en su valor por defecto
+  assert.equal(Number(updated.weight_step), 2.5);
 
   await assert.rejects(
     () =>
@@ -421,7 +460,7 @@ test('no se puede repetir nombre y se puede editar', async () => {
         defaultSets: 2,
         minReps: 6,
         maxReps: 10,
-        weightStep: 2.5,
+        initialWeight: 0,
       }),
     /Ya existe/
   );
@@ -447,7 +486,7 @@ test('dar de baja mantiene el ejercicio oculto y se puede reactivar', async () =
     defaultSets: 3,
     minReps: 8,
     maxReps: 12,
-    weightStep: 2.5,
+    initialWeight: 0,
   });
   assert.equal(revived.reactivated, true);
   assert.equal(revived.id, id);
@@ -591,7 +630,7 @@ async function seedTrainingData(db) {
   );
   for (const name of ['Press banca', 'Sentadilla', 'Remo']) {
     await db.runAsync(
-      'INSERT INTO exercises (name, default_sets, min_reps, max_reps, weight_step) VALUES (?, 2, 6, 10, 2.5);',
+      'INSERT INTO exercises (name, default_sets, min_reps, max_reps) VALUES (?, 2, 6, 10);',
       [name]
     );
   }
@@ -695,35 +734,110 @@ test('finalizar el entrenamiento guarda todo y volver a finalizar actualiza', as
   );
 });
 
-test('sugerencia de progresión: sube un salto si siempre llegó al máximo', async () => {
+/** Guarda una sesión del ejercicio 1 (Press banca) con todas las series iguales. */
+async function logSession(db, date, weight, reps, { sets = 2, exerciseId = 1 } = {}) {
+  await saveWorkout(db, {
+    routineId: 1,
+    date,
+    entries: [
+      {
+        exerciseId,
+        sets: Array.from({ length: sets }, () => ({
+          weight: String(weight),
+          reps: String(reps),
+        })),
+      },
+    ],
+  });
+}
+
+async function suggestionFor(db, weeks, now, exerciseId = 1) {
+  const exercises = (await getDayExercises(db, 1)).filter(
+    (exercise) => Number(exercise.id) === exerciseId
+  );
+  const suggestions = await getProgressionSuggestions(db, exercises, weeks, now);
+  return suggestions.get(exerciseId);
+}
+
+test('progresión: terminar la primera sesión en el máximo no avisa todavía (1 y 2 semanas)', async () => {
   const db = createAdapter();
   await db.execAsync(SCHEMA_SQL);
   await seedTrainingData(db);
 
-  for (const date of ['2026-11-09', '2026-11-16']) {
-    await saveWorkout(db, {
-      routineId: 1,
-      date,
-      entries: [
-        { exerciseId: 1, sets: [{ weight: '60', reps: '10' }, { weight: '60', reps: '10' }] },
-        { exerciseId: 2, sets: [{ weight: '80', reps: '8' }] },
-      ],
-    });
+  await logSession(db, '2026-11-16', 60, 10);
+
+  // Mismo día en que se guardó la sesión y los días siguientes de esa semana
+  for (const weeks of [1, 2]) {
+    assert.equal(await suggestionFor(db, weeks, new Date(2026, 10, 16)), undefined);
+    assert.equal(await suggestionFor(db, weeks, new Date(2026, 10, 18)), undefined);
+    assert.equal(await suggestionFor(db, weeks, new Date(2026, 10, 22)), undefined);
   }
+});
 
-  const exercises = await getDayExercises(db, 1);
-  const suggestions = await getProgressionSuggestions(
-    db,
-    exercises,
-    2,
-    new Date(2026, 10, 18)
-  );
-  assert.equal(suggestions.get(1), 62.5);
-  assert.equal(suggestions.has(2), false);
+test('progresión de 1 semana: avisa recién cuando se cumplió la semana', async () => {
+  const db = createAdapter();
+  await db.execAsync(SCHEMA_SQL);
+  await seedTrainingData(db);
 
-  // Fuera de la ventana de 1 semana ya no hay sugerencia
-  const none = await getProgressionSuggestions(db, exercises, 1, new Date(2026, 10, 30));
-  assert.equal(none.size, 0);
+  await logSession(db, '2026-11-09', 60, 10);
+  await logSession(db, '2026-11-11', 60, 10);
+
+  // Pasaron 6 días desde que empezó con 60 kg: todavía no
+  assert.equal(await suggestionFor(db, 1, new Date(2026, 10, 15)), undefined);
+  // Pasaron 7 días: ahora sí, un salto fijo de 2,5 kg
+  assert.equal(await suggestionFor(db, 1, new Date(2026, 10, 16)), 62.5);
+
+  // Con la configuración de 2 semanas todavía no corresponde
+  assert.equal(await suggestionFor(db, 2, new Date(2026, 10, 16)), undefined);
+});
+
+test('progresión de 2 semanas: avisa a los 14 días con el máximo en todo el período', async () => {
+  const db = createAdapter();
+  await db.execAsync(SCHEMA_SQL);
+  await seedTrainingData(db);
+
+  await logSession(db, '2026-11-09', 60, 10);
+  await logSession(db, '2026-11-16', 60, 10);
+
+  assert.equal(await suggestionFor(db, 2, new Date(2026, 10, 16)), undefined);
+  assert.equal(await suggestionFor(db, 2, new Date(2026, 10, 22)), undefined);
+  assert.equal(await suggestionFor(db, 2, new Date(2026, 10, 23)), 62.5);
+
+  // Si el período ya pasó pero una sesión de la ventana no llegó al máximo, no avisa
+  await logSession(db, '2026-11-23', 60, 8);
+  assert.equal(await suggestionFor(db, 2, new Date(2026, 10, 23)), undefined);
+  assert.equal(await suggestionFor(db, 1, new Date(2026, 10, 23)), undefined);
+});
+
+test('progresión: cambiar el peso reinicia el período y el salto es fijo', async () => {
+  const db = createAdapter();
+  await db.execAsync(SCHEMA_SQL);
+  await seedTrainingData(db);
+  // Aunque la columna legacy weight_step tenga otro valor, el salto es 2,5 kg
+  await db.runAsync('UPDATE exercises SET weight_step = 5 WHERE id = 1;');
+  assert.equal(WEIGHT_STEP, 2.5);
+
+  await logSession(db, '2026-11-02', 60, 10);
+  await logSession(db, '2026-11-09', 62.5, 10);
+
+  // Con 62,5 kg solo pasaron 3 días: la semana vuelve a empezar
+  assert.equal(await suggestionFor(db, 1, new Date(2026, 10, 12)), undefined);
+  assert.equal(await suggestionFor(db, 1, new Date(2026, 10, 16)), 65);
+
+  // Un ejercicio que no llegó al máximo nunca sugiere
+  await logSession(db, '2026-11-02', 80, 8, { exerciseId: 2 });
+  await logSession(db, '2026-11-09', 80, 8, { exerciseId: 2 });
+  assert.equal(await suggestionFor(db, 1, new Date(2026, 10, 16), 2), undefined);
+
+  // Series con pesos distintos dentro de la última sesión no cuentan como tramo
+  await saveWorkout(db, {
+    routineId: 1,
+    date: '2026-11-16',
+    entries: [
+      { exerciseId: 1, sets: [{ weight: '65', reps: '10' }, { weight: '60', reps: '10' }] },
+    ],
+  });
+  assert.equal(await suggestionFor(db, 1, new Date(2026, 10, 30)), undefined);
 });
 
 test('historial completo: paginado, filtro por ejercicio y totales', async () => {
@@ -816,6 +930,7 @@ test('borradores del entrenamiento: completar, finalizar y ajustar pesos', () =>
   ]);
 
   assert.equal(adjustWeight('60', 2.5, 'up'), '62.5');
+  assert.equal(adjustWeight('60', undefined, 'up'), '62.5'); // salto fijo por defecto
   assert.equal(adjustWeight('', 2.5, 'up'), '2.5');
   assert.equal(adjustWeight('1', 2.5, 'down'), '0');
   assert.equal(adjustWeight('0,1', 0.1, 'up'), '0.2');
@@ -829,6 +944,164 @@ test('borradores del entrenamiento: completar, finalizar y ajustar pesos', () =>
     ),
     '40 kg × 8 · 7'
   );
+});
+
+test('peso inicial: se guarda en el catálogo y se precarga al entrenar', async () => {
+  const db = await freshDb();
+  const press = await addExercise(db, 'Press banca', { initialWeight: '42,5' });
+  const remo = await addExercise(db, 'Remo');
+  await appendExerciseToDay(db, 1, press);
+  await appendExerciseToDay(db, 1, remo);
+
+  const stored = await db.getFirstAsync('SELECT * FROM exercises WHERE id = ?', [press]);
+  assert.equal(Number(stored.initial_weight), 42.5);
+  assert.equal(Number(stored.weight_step), 2.5);
+  assert.equal(
+    Number((await db.getFirstAsync('SELECT * FROM exercises WHERE id = ?', [remo])).initial_weight),
+    0
+  );
+
+  // Sin historial: el peso inicial es el peso por defecto de todas las series
+  const exercises = await getDayExercises(db, 1);
+  let drafts = buildInitialDrafts(exercises, new Map(), new Map());
+  assert.deepEqual(drafts[press], [
+    { weight: '42.5', reps: '' },
+    { weight: '42.5', reps: '' },
+  ]);
+  // Sin peso inicial queda vacío, como antes
+  assert.deepEqual(drafts[remo], [
+    { weight: '', reps: '' },
+    { weight: '', reps: '' },
+  ]);
+
+  // Es editable libremente en la rutina del día
+  drafts = {
+    ...drafts,
+    [press]: drafts[press].map((set) => ({ ...set, weight: adjustWeight(set.weight, WEIGHT_STEP, 'up') })),
+  };
+  assert.equal(drafts[press][0].weight, '45');
+
+  // Con historial manda el último peso usado
+  const lastLogs = new Map([[press, [{ setNumber: 1, weight: 50, reps: 8 }]]]);
+  assert.equal(buildInitialDrafts(exercises, lastLogs, new Map())[press][0].weight, '50');
+
+  // Se puede editar el peso inicial y también quitarlo
+  await updateExercise(db, press, {
+    name: 'Press banca',
+    defaultSets: 2,
+    minReps: 6,
+    maxReps: 10,
+    initialWeight: '',
+  });
+  assert.equal(
+    Number((await db.getFirstAsync('SELECT * FROM exercises WHERE id = ?', [press])).initial_weight),
+    0
+  );
+
+  assert.equal(formatInitialWeight(42.5), ' · inicial 42,5 kg');
+  assert.equal(formatInitialWeight(0), '');
+  assert.equal(formatInitialWeight(undefined), '');
+});
+
+test('pantalla principal: solo el primer ejercicio arranca abierto', () => {
+  const exercises = [{ id: 7 }, { id: 3 }, { id: 9 }];
+  assert.deepEqual([...buildInitialCollapsed(exercises)], [3, 9]);
+  assert.equal(buildInitialCollapsed([{ id: 1 }]).size, 0);
+  assert.equal(buildInitialCollapsed([]).size, 0);
+});
+
+test('RIR: se guarda por ejercicio, es opcional y se restaura al volver', async () => {
+  const db = createAdapter();
+  await db.execAsync(SCHEMA_SQL);
+  await seedTrainingData(db);
+
+  const exercises = [{ id: 1 }, { id: 2 }];
+  const drafts = {
+    1: [{ weight: '60', reps: '8' }, { weight: '60', reps: '7' }],
+    2: [{ weight: '80', reps: '10' }],
+  };
+
+  // Sin RIR en ningún ejercicio: se guarda igual (no es obligatorio)
+  let entries = buildWorkoutEntries(exercises, drafts, {});
+  assert.equal(entries[0].rir, null);
+  await saveWorkout(db, { routineId: 1, date: '2026-11-16', entries });
+  let rows = await db.getAllAsync('SELECT rir FROM set_logs;');
+  assert.ok(rows.every((row) => row.rir === null));
+
+  // RIR 2 en el ejercicio 1 y sin RIR en el 2: se repite en todas las series del 1
+  entries = buildWorkoutEntries(exercises, drafts, { 1: 2, 2: null });
+  await saveWorkout(db, { routineId: 1, date: '2026-11-16', entries });
+  rows = await db.getAllAsync('SELECT exercise_id, rir FROM set_logs ORDER BY id;');
+  assert.deepEqual(
+    rows.map((row) => [Number(row.exercise_id), row.rir === null ? null : Number(row.rir)]).sort(),
+    [[1, 2], [1, 2], [2, null]]
+  );
+
+  // Al volver a la pantalla se restaura la selección guardada hoy
+  const data = await getWorkoutData(db, 1, '2026-11-16');
+  assert.deepEqual(buildInitialRir(exercises, data.savedLogs), { 1: 2, 2: null });
+  assert.deepEqual(buildInitialRir(exercises, new Map()), { 1: null, 2: null });
+
+  // Corregir y volver a finalizar actualiza el RIR (también se puede quitar)
+  entries = buildWorkoutEntries(exercises, drafts, { 1: 3, 2: 1 });
+  await saveWorkout(db, { routineId: 1, date: '2026-11-16', entries });
+  const updated = await getWorkoutData(db, 1, '2026-11-16');
+  assert.deepEqual(buildInitialRir(exercises, updated.savedLogs), { 1: 3, 2: 1 });
+  await saveWorkout(db, {
+    routineId: 1,
+    date: '2026-11-16',
+    entries: buildWorkoutEntries(exercises, drafts, { 1: null, 2: 1 }),
+  });
+  const cleared = await getWorkoutData(db, 1, '2026-11-16');
+  assert.deepEqual(buildInitialRir(exercises, cleared.savedLogs), { 1: null, 2: 1 });
+
+  // Solo se admiten 1, 2 o 3
+  for (const invalid of [0, 4, 1.5, 'x']) {
+    await assert.rejects(
+      () =>
+        saveWorkout(db, {
+          routineId: 1,
+          date: '2026-11-17',
+          entries: buildWorkoutEntries(exercises, drafts, { 1: invalid }),
+        }),
+      /RIR/
+    );
+  }
+  assert.throws(
+    () => db.raw.prepare('UPDATE set_logs SET rir = 5;').run(),
+    /CHECK/
+  );
+});
+
+test('migración: una base anterior suma peso inicial y RIR sin perder datos', async () => {
+  const db = createAdapter();
+  // Esquema de la versión anterior (sin initial_weight ni rir)
+  await db.execAsync(`
+    CREATE TABLE routines (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, day_code TEXT NOT NULL UNIQUE, is_extra INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0, warmup TEXT NOT NULL DEFAULT '');
+    CREATE TABLE exercises (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, default_sets INTEGER NOT NULL DEFAULT 2, min_reps INTEGER NOT NULL DEFAULT 6, max_reps INTEGER NOT NULL DEFAULT 10, weight_step REAL NOT NULL DEFAULT 2.5, is_active INTEGER NOT NULL DEFAULT 1);
+    CREATE TABLE workout_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, routine_id INTEGER NOT NULL, session_date TEXT NOT NULL, notes TEXT);
+    CREATE TABLE set_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id INTEGER NOT NULL, exercise_id INTEGER NOT NULL, set_number INTEGER NOT NULL, weight REAL NOT NULL, reps INTEGER NOT NULL, completed_at TEXT NOT NULL);
+    INSERT INTO routines (name, day_code) VALUES ('Lunes', 'LUN');
+    INSERT INTO exercises (name, weight_step) VALUES ('Press banca', 5);
+    INSERT INTO workout_sessions (routine_id, session_date) VALUES (1, '2026-11-09');
+    INSERT INTO set_logs (session_id, exercise_id, set_number, weight, reps, completed_at) VALUES (1, 1, 1, 60, 10, '2026-11-09T10:00:00.000Z');
+  `);
+
+  await addMissingColumns(db);
+  await addMissingColumns(db); // idempotente
+
+  const exercise = await db.getFirstAsync('SELECT * FROM exercises WHERE id = 1;');
+  assert.equal(exercise.name, 'Press banca');
+  assert.equal(Number(exercise.initial_weight), 0);
+  const log = await db.getFirstAsync('SELECT * FROM set_logs WHERE id = 1;');
+  assert.equal(Number(log.weight), 60);
+  assert.equal(log.rir, null);
+
+  // Y sobre esa base ya se puede guardar con RIR
+  await db.runAsync('UPDATE set_logs SET rir = 2 WHERE id = 1;');
+  assert.equal(Number((await db.getFirstAsync('SELECT rir FROM set_logs WHERE id = 1;')).rir), 2);
+  const columns = (await db.getAllAsync('PRAGMA table_info(exercises);')).map((c) => c.name);
+  assert.equal(columns.filter((name) => name === 'initial_weight').length, 1);
 });
 
 async function main() {

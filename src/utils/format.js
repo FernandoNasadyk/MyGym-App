@@ -140,6 +140,16 @@ export function formatWeight(value) {
   return String(Math.round(numeric * 100) / 100).replace('.', ',');
 }
 
+/**
+ * Sufijo para mostrar el peso inicial de un ejercicio en sus listados:
+ * 40 -> " · inicial 40 kg"; sin peso inicial (0 o vacío) -> "".
+ */
+export function formatInitialWeight(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return '';
+  return ` · inicial ${formatWeight(numeric)} kg`;
+}
+
 /** 1240 -> "1.240" */
 export function formatNumber(value) {
   const numeric = Number(value);

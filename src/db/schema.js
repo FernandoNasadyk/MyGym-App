@@ -21,6 +21,7 @@ export const SCHEMA_SQL = `
     min_reps INTEGER NOT NULL DEFAULT 6,
     max_reps INTEGER NOT NULL DEFAULT 10,
     weight_step REAL NOT NULL DEFAULT 2.5,
+    initial_weight REAL NOT NULL DEFAULT 0,
     is_active INTEGER NOT NULL DEFAULT 1
   );
 
@@ -49,6 +50,7 @@ export const SCHEMA_SQL = `
     set_number INTEGER NOT NULL,
     weight REAL NOT NULL,
     reps INTEGER NOT NULL,
+    rir INTEGER CHECK (rir IS NULL OR rir BETWEEN 1 AND 3),
     completed_at TEXT NOT NULL,
     FOREIGN KEY (session_id) REFERENCES workout_sessions(id) ON DELETE CASCADE,
     FOREIGN KEY (exercise_id) REFERENCES exercises(id) ON DELETE CASCADE

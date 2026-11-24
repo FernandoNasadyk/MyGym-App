@@ -6,6 +6,8 @@
  * Native ni de SQLite, así que se puede testear con node.
  */
 
+import { WEIGHT_STEP } from '../constants/training.js';
+
 const MAX_SETS = 20;
 
 /** Deja solo dígitos y una coma/punto decimal (máx. 2 decimales). */
@@ -60,13 +62,14 @@ export function isWorkoutComplete(exercises = [], drafts = {}) {
 }
 
 /**
- * Suma o resta un salto de peso. Nunca baja de 0 y evita errores de coma
- * flotante (2.5 + 2.5 + ... queda siempre con a lo sumo 2 decimales).
+ * Suma o resta un salto de peso (por defecto, el salto fijo de 2,5 kg).
+ * Nunca baja de 0 y evita errores de coma flotante (2.5 + 2.5 + ... queda
+ * siempre con a lo sumo 2 decimales).
  */
 export function adjustWeight(value, step, direction) {
   const current = toNumber(value);
   const base = Number.isFinite(current) ? current : 0;
-  const delta = Number(step) > 0 ? Number(step) : 2.5;
+  const delta = Number(step) > 0 ? Number(step) : WEIGHT_STEP;
   const next = direction === 'down' ? base - delta : base + delta;
   const rounded = Math.round(Math.max(0, next) * 100) / 100;
   return String(rounded);
@@ -78,6 +81,8 @@ export function adjustWeight(value, step, direction) {
  * - Si hoy ya se guardó una sesión, se muestran esas series.
  * - Si no, la cantidad de series sale del ejercicio y el peso se precarga con
  *   el de la última sesión (las repeticiones quedan vacías).
+ * - Si el ejercicio todavía no tiene historial, el peso se precarga con su
+ *   "peso inicial" (si tiene uno). Siempre se puede editar en pantalla.
  */
 export function buildInitialDrafts(exercises = [], lastLogs, savedLogs) {
   const drafts = {};
@@ -97,7 +102,12 @@ export function buildInitialDrafts(exercises = [], lastLogs, savedLogs) {
       Math.max(Number(exercise.default_sets) || 2, 1),
       MAX_SETS
     );
-    const fallbackWeight = last.length > 0 ? String(last[0].weight) : '';
+    const initialWeight = Number(exercise.initial_weight);
+    const startWeight =
+      Number.isFinite(initialWeight) && initialWeight > 0
+        ? String(initialWeight)
+        : '';
+    const fallbackWeight = last.length > 0 ? String(last[0].weight) : startWeight;
 
     drafts[exercise.id] = Array.from({ length: count }, (_, index) => {
       const previous = last[index];
@@ -124,10 +134,33 @@ export function removeLastSet(sets = []) {
   return sets.slice(0, -1);
 }
 
+/**
+ * RIR inicial de cada ejercicio: el que se guardó hoy (si ya hay una sesión
+ * guardada) o null = sin RIR. Devuelve { [exerciseId]: 1 | 2 | 3 | null }.
+ */
+export function buildInitialRir(exercises = [], savedLogs) {
+  const rirByExercise = {};
+  for (const exercise of exercises) {
+    const saved = savedLogs?.get(exercise.id) || [];
+    const withRir = saved.find((set) => set.rir != null);
+    rirByExercise[exercise.id] = withRir ? Number(withRir.rir) : null;
+  }
+  return rirByExercise;
+}
+
+/**
+ * Ejercicios que arrancan contraídos al cargar el día: todos menos el primero.
+ * (El calentamiento y el primer ejercicio inician abiertos.)
+ */
+export function buildInitialCollapsed(exercises = []) {
+  return new Set(exercises.slice(1).map((exercise) => exercise.id));
+}
+
 /** Convierte los borradores en las entradas que espera saveWorkout. */
-export function buildWorkoutEntries(exercises = [], drafts = {}) {
+export function buildWorkoutEntries(exercises = [], drafts = {}, rirByExercise = {}) {
   return exercises.map((exercise) => ({
     exerciseId: exercise.id,
+    rir: rirByExercise[exercise.id] ?? null,
     sets: (drafts[exercise.id] || []).map((set) => ({
       weight: set.weight,
       reps: set.reps,

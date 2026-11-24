@@ -24,6 +24,7 @@ import ExerciseEditorModal from '../components/exercise-editor-modal';
 import ConfirmDialog from '../components/confirm-dialog';
 import ScreenHeader from '../components/screen-header';
 import { cardShadow, colors, radius, spacing } from '../constants/app-theme';
+import { formatInitialWeight } from '../utils/format';
 
 export default function ExercisesCatalogScreen() {
   const router = useRouter();
@@ -38,7 +39,7 @@ export default function ExercisesCatalogScreen() {
   const [defaultSets, setDefaultSets] = useState('2');
   const [minReps, setMinReps] = useState('6');
   const [maxReps, setMaxReps] = useState('10');
-  const [weightStep, setWeightStep] = useState('2.5');
+  const [initialWeight, setInitialWeight] = useState('');
   const [selectedRoutineIds, setSelectedRoutineIds] = useState([]);
 
   const [loading, setLoading] = useState(true);
@@ -100,7 +101,7 @@ export default function ExercisesCatalogScreen() {
     setDefaultSets('2');
     setMinReps('6');
     setMaxReps('10');
-    setWeightStep('2.5');
+    setInitialWeight('');
     setSelectedRoutineIds([]);
   };
 
@@ -114,7 +115,7 @@ export default function ExercisesCatalogScreen() {
         defaultSets,
         minReps,
         maxReps,
-        weightStep,
+        initialWeight,
       });
 
       const db = await getDatabase();
@@ -245,12 +246,14 @@ export default function ExercisesCatalogScreen() {
               />
             </View>
             <View style={styles.halfInput}>
-              <Text style={styles.label}>Salto de peso (kg)</Text>
+              <Text style={styles.label}>Peso inicial (kg)</Text>
               <TextInput
                 style={styles.input}
                 keyboardType="decimal-pad"
-                value={weightStep}
-                onChangeText={setWeightStep}
+                placeholder="Opcional"
+                placeholderTextColor="#64748b"
+                value={initialWeight}
+                onChangeText={setInitialWeight}
               />
             </View>
           </View>
@@ -360,7 +363,7 @@ export default function ExercisesCatalogScreen() {
                           <Text style={styles.exerciseName}>{ex.name}</Text>
                           <Text style={styles.exerciseMeta}>
                             {ex.default_sets} ser · {ex.min_reps}–{ex.max_reps}{' '}
-                            reps · +{ex.weight_step} kg · {assignedSet.size}{' '}
+                            reps{formatInitialWeight(ex.initial_weight)} · {assignedSet.size}{' '}
                             {assignedSet.size === 1 ? 'día' : 'días'}
                           </Text>
                         </View>

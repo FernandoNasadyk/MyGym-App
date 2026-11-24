@@ -14,7 +14,7 @@ import { normalizeExerciseInput } from '../db/day-exercises';
 
 /**
  * Modal para editar los datos base de un ejercicio (series, repeticiones,
- * salto de peso y nombre). No toca el historial de series ya registradas.
+ * peso inicial y nombre). No toca el historial de series ya registradas.
  *
  * `onSave` recibe los datos ya normalizados y puede lanzar un Error
  * (por ejemplo, si el nombre ya existe); el mensaje se muestra en el modal.
@@ -29,7 +29,7 @@ export default function ExerciseEditorModal({
   const [defaultSets, setDefaultSets] = useState('2');
   const [minReps, setMinReps] = useState('6');
   const [maxReps, setMaxReps] = useState('10');
-  const [weightStep, setWeightStep] = useState('2.5');
+  const [initialWeight, setInitialWeight] = useState('');
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
 
@@ -39,7 +39,11 @@ export default function ExerciseEditorModal({
     setDefaultSets(String(exercise.default_sets ?? 2));
     setMinReps(String(exercise.min_reps ?? 6));
     setMaxReps(String(exercise.max_reps ?? 10));
-    setWeightStep(String(exercise.weight_step ?? 2.5).replace('.', ','));
+    setInitialWeight(
+      Number(exercise.initial_weight) > 0
+        ? String(exercise.initial_weight).replace('.', ',')
+        : ''
+    );
     setError(null);
     setSaving(false);
   }, [exercise]);
@@ -54,7 +58,7 @@ export default function ExerciseEditorModal({
         defaultSets,
         minReps,
         maxReps,
-        weightStep,
+        initialWeight,
       });
 
       await onSave(data);
@@ -122,12 +126,14 @@ export default function ExerciseEditorModal({
                 />
               </View>
               <View style={styles.halfInput}>
-                <Text style={styles.label}>Salto (kg)</Text>
+                <Text style={styles.label}>Peso inicial (kg)</Text>
                 <TextInput
                   style={styles.input}
                   keyboardType="decimal-pad"
-                  value={weightStep}
-                  onChangeText={setWeightStep}
+                  placeholder="Opcional"
+                  placeholderTextColor="#64748b"
+                  value={initialWeight}
+                  onChangeText={setInitialWeight}
                 />
               </View>
             </View>
