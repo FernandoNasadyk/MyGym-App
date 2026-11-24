@@ -21,15 +21,17 @@ import {
 } from '../db/day-exercises';
 import { getRoutineById, updateRoutine } from '../db/routines';
 import { getDayLabel } from '../constants/weekdays';
-import { cardShadow, colors, radius, spacing } from '../constants/app-theme';
+import { radius, spacing } from '../constants/app-theme';
 import ScreenHeader from '../components/screen-header';
 import ExerciseEditorModal from '../components/exercise-editor-modal';
 import ConfirmDialog from '../components/confirm-dialog';
 import RoutineFormModal from '../components/routine-form-modal';
 import { parseWarmupSteps } from '../utils/warmup';
 import { formatInitialWeight } from '../utils/format';
+import { useStyles } from '../components/theme-provider';
 
 export default function RoutineEditorScreen() {
+  const { styles, colors } = useStyles(createStyles);
   const router = useRouter();
   const params = useLocalSearchParams();
 
@@ -254,9 +256,15 @@ export default function RoutineEditorScreen() {
                 setStatusMsg(null);
               }}
               activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel={
+                showCatalogPicker
+                  ? 'Cerrar el selector de ejercicios'
+                  : 'Sumar un ejercicio del catálogo'
+              }
             >
-              <Text style={styles.catalogButtonText}>
-                {showCatalogPicker ? 'Cerrar' : '+ Del catálogo'}
+              <Text style={styles.catalogButtonText} numberOfLines={1}>
+                {showCatalogPicker ? 'Cerrar' : '+ Ejercicio'}
               </Text>
             </TouchableOpacity>
           }
@@ -550,7 +558,8 @@ export default function RoutineEditorScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) =>
+  StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.bg,
@@ -592,7 +601,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing.lg,
     gap: 10,
-    ...cardShadow,
+    ...colors.cardShadow,
   },
   warmupHeader: {
     flexDirection: 'row',
@@ -670,7 +679,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing.lg,
     gap: 10,
-    ...cardShadow,
+    ...colors.cardShadow,
   },
   pickerHint: {
     color: colors.textMuted,
@@ -723,7 +732,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing.lg,
     gap: spacing.md,
-    ...cardShadow,
+    ...colors.cardShadow,
   },
   sectionHeaderRow: {
     flexDirection: 'row',
@@ -860,7 +869,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   primaryButtonText: {
-    color: colors.text,
+    color: colors.onPrimary,
     fontWeight: '800',
     fontSize: 14,
   },

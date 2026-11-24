@@ -74,7 +74,7 @@ scripts/test-db.mjs      tests con node:sqlite
 ## Chequeos
 
 ```bash
-npm run test:db     # 26 tests de días, entrenamiento, progresión, RIR, migraciones, historial y formato
+npm run test:db     # 28 tests de días, entrenamiento, progresión, RIR, migraciones, respaldo, historial y formato
 npx tsc --noEmit    # typecheck (también revisa la sintaxis de los .jsx)
 ```
 
@@ -85,3 +85,10 @@ npx tsc --noEmit    # typecheck (también revisa la sintaxis de los .jsx)
 - Exportar/importar la base para backup.
 - Reordenar con arrastrar y soltar (hoy se usan flechas ↑ ↓).
 - Guardar el borrador del entrenamiento en curso por si se cierra la app antes de finalizar.
+
+## Ajustes: tema y respaldo
+
+- **Tema**: modo claro u oscuro (ambos en verde), guardado en `app_settings.theme`.
+- **Respaldo**: Ajustes → Respaldo → *Exportar* comparte un texto JSON con todos los datos
+  (sin internet ni cuenta); *Restaurar* pide pegar ese texto, muestra qué contiene y reemplaza
+  los datos actuales en una transacción (si falla, no se modifica nada).

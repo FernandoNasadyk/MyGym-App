@@ -168,16 +168,19 @@ export function buildWorkoutEntries(exercises = [], drafts = {}, rirByExercise =
   }));
 }
 
-/** Texto corto con lo que se hizo la última vez: "40 kg × 8 · 8 · 7". */
+/**
+ * Texto corto con lo que se hizo la última vez: "40 kg × 8 · 8 · 7" y, si se
+ * registró, el RIR: "40 kg × 8 · 8 · 7 · RIR 2".
+ */
 export function describeLastSets(sets = [], formatWeight = String) {
   if (!sets || sets.length === 0) return '';
   const allSameWeight = sets.every((set) => set.weight === sets[0].weight);
-  if (allSameWeight) {
-    return `${formatWeight(sets[0].weight)} kg × ${sets
-      .map((set) => set.reps)
-      .join(' · ')}`;
-  }
-  return sets
-    .map((set) => `${formatWeight(set.weight)}×${set.reps}`)
-    .join(' · ');
+  const base = allSameWeight
+    ? `${formatWeight(sets[0].weight)} kg × ${sets
+        .map((set) => set.reps)
+        .join(' · ')}`
+    : sets.map((set) => `${formatWeight(set.weight)}×${set.reps}`).join(' · ');
+
+  const rir = sets.find((set) => set.rir != null)?.rir;
+  return rir != null ? `${base} · RIR ${rir}` : base;
 }

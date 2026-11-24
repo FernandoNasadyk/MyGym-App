@@ -1,5 +1,6 @@
 import React from 'react';
 import { Modal, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { useStyles } from './theme-provider';
 
 /**
  * Diálogo de confirmación con el estilo de la app.
@@ -15,6 +16,7 @@ export default function ConfirmDialog({
   onConfirm,
   onCancel,
 }) {
+  const { styles } = useStyles(createStyles);
   return (
     <Modal
       visible={visible}
@@ -62,7 +64,8 @@ export default function ConfirmDialog({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) =>
+  StyleSheet.create({
   overlay: {
     flex: 1,
     alignItems: 'center',
@@ -75,14 +78,14 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     left: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backgroundColor: colors.overlay,
   },
   card: {
     width: '100%',
     maxWidth: 400,
-    backgroundColor: '#111a15',
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: '#1f3328',
+    borderColor: colors.border,
     borderRadius: 16,
     padding: 18,
     gap: 10,
@@ -90,12 +93,12 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 18,
     fontWeight: '800',
-    color: '#ecfdf5',
+    color: colors.text,
   },
   message: {
     fontSize: 14,
     lineHeight: 20,
-    color: '#cbd5e1',
+    color: colors.textSecondary,
   },
   actions: {
     flexDirection: 'row',
@@ -109,23 +112,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   cancelButton: {
-    backgroundColor: '#090d0b',
+    backgroundColor: colors.bg,
     borderWidth: 1,
-    borderColor: '#1f3328',
+    borderColor: colors.border,
   },
   confirmButton: {
-    backgroundColor: '#059669',
+    backgroundColor: colors.primaryStrong,
   },
   dangerButton: {
-    backgroundColor: '#b91c1c',
+    backgroundColor: colors.dangerStrong,
   },
   cancelText: {
-    color: '#cbd5e1',
+    color: colors.textSecondary,
     fontWeight: '700',
     fontSize: 14,
   },
   confirmText: {
-    color: '#ecfdf5',
+    color: colors.onPrimary,
     fontWeight: '800',
     fontSize: 14,
   },

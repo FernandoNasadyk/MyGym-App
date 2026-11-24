@@ -85,29 +85,39 @@ export function normalizeWorkoutEntries(entries) {
 
 /**
  * Últimas series de cada ejercicio (de su sesión más reciente).
- * Devuelve un Map exerciseId -> [{ setNumber, weight, reps }].
+ * Si se pasa `beforeDate` (YYYY-MM-DD), solo se consideran sesiones de fechas
+ * anteriores: así la referencia es siempre la última sesión *previa* y no la
+ * que se está cargando hoy.
+ * Devuelve un Map exerciseId -> [{ setNumber, weight, reps, rir, date }].
  */
-export async function getLastSetLogs(db, exerciseIds = []) {
+export async function getLastSetLogs(db, exerciseIds = [], beforeDate = null) {
   const ids = exerciseIds
     .map((id) => Number(id))
     .filter((id) => Number.isInteger(id) && id > 0);
   if (ids.length === 0) return new Map();
 
   const placeholders = ids.map(() => '?').join(', ');
+  const dateFilter = beforeDate ? 'AND ws2.session_date < ?' : '';
+  const dateFilterOuter = beforeDate ? 'AND ws.session_date < ?' : '';
+  const params = beforeDate ? [...ids, beforeDate, beforeDate] : ids;
+
   const rows = await db.getAllAsync(
-    `WITH latest AS (
-       SELECT sl.exercise_id, MAX(ws.id) AS session_id
-       FROM set_logs sl
-       INNER JOIN workout_sessions ws ON ws.id = sl.session_id
-       WHERE sl.exercise_id IN (${placeholders})
-       GROUP BY sl.exercise_id
-     )
-     SELECT sl.exercise_id, sl.set_number, sl.weight, sl.reps
+    `SELECT sl.exercise_id, sl.set_number, sl.weight, sl.reps, sl.rir,
+            ws.session_date
      FROM set_logs sl
-     INNER JOIN latest l
-       ON l.exercise_id = sl.exercise_id AND l.session_id = sl.session_id
+     INNER JOIN workout_sessions ws ON ws.id = sl.session_id
+     WHERE sl.exercise_id IN (${placeholders})
+       ${dateFilterOuter}
+       AND ws.id = (
+         SELECT ws2.id
+         FROM workout_sessions ws2
+         INNER JOIN set_logs sl2 ON sl2.session_id = ws2.id
+         WHERE sl2.exercise_id = sl.exercise_id ${dateFilter}
+         ORDER BY ws2.session_date DESC, ws2.id DESC
+         LIMIT 1
+       )
      ORDER BY sl.exercise_id ASC, sl.set_number ASC;`,
-    ids
+    params
   );
 
   const map = new Map();
@@ -118,6 +128,8 @@ export async function getLastSetLogs(db, exerciseIds = []) {
       setNumber: Number(row.set_number),
       weight: Number(row.weight),
       reps: Number(row.reps),
+      rir: row.rir == null ? null : Number(row.rir),
+      date: String(row.session_date),
     });
   }
   return map;
@@ -178,9 +190,11 @@ export async function getSessionLogs(db, sessionId) {
  */
 export async function getWorkoutData(db, routineId, date) {
   const exercises = await getDayExercises(db, routineId);
+  // La referencia es la última sesión previa a la fecha que se está cargando.
   const lastLogs = await getLastSetLogs(
     db,
-    exercises.map((exercise) => exercise.id)
+    exercises.map((exercise) => exercise.id),
+    date
   );
   const session = await getSessionForDate(db, routineId, date);
   const savedLogs = session ? await getSessionLogs(db, session.id) : new Map();

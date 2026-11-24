@@ -20,7 +20,6 @@ export const SCHEMA_SQL = `
     default_sets INTEGER NOT NULL DEFAULT 2,
     min_reps INTEGER NOT NULL DEFAULT 6,
     max_reps INTEGER NOT NULL DEFAULT 10,
-    weight_step REAL NOT NULL DEFAULT 2.5,
     initial_weight REAL NOT NULL DEFAULT 0,
     is_active INTEGER NOT NULL DEFAULT 1
   );

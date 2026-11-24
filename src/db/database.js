@@ -1,50 +1,9 @@
 import * as SQLite from 'expo-sqlite';
 import { SCHEMA_SQL } from './schema';
 import { normalizeAllDayOrders } from './day-exercises';
-import { addMissingColumns } from './migrations';
 
 let dbInstance = null;
 let dbPromise = null;
-
-async function migrateIfNeeded(db) {
-  // Si existía la rutina vieja "Jueves (Extra)", la pasamos a "Día Extra"
-  await db.runAsync(
-    `UPDATE routines
-     SET name = 'Día Extra', day_code = 'EXTRA'
-     WHERE name = 'Jueves (Extra)' OR day_code = 'JUE_EXTRA';`
-  );
-
-  // Asegurar columna warmup en routines para bases ya creadas
-  const routineCols = await db.getAllAsync('PRAGMA table_info(routines);');
-  const hasWarmup = routineCols.some((col) => col.name === 'warmup');
-  if (!hasWarmup) {
-    await db.runAsync(
-      `ALTER TABLE routines ADD COLUMN warmup TEXT NOT NULL DEFAULT '';`
-    );
-  }
-
-  // Columnas nuevas (peso inicial del ejercicio y RIR de las series)
-  await addMissingColumns(db);
-
-  // Si la tabla exercises tenía routine_id de una versión anterior y routine_exercises está vacía,
-  // migramos esos vínculos existentes sin perder datos.
-  const tableInfo = await db.getAllAsync('PRAGMA table_info(exercises);');
-  const hasLegacyRoutineId = tableInfo.some((col) => col.name === 'routine_id');
-
-  if (hasLegacyRoutineId) {
-    const existingLinks = await db.getFirstAsync(
-      'SELECT COUNT(*) AS total FROM routine_exercises;'
-    );
-    if (!existingLinks || existingLinks.total === 0) {
-      await db.runAsync(`
-        INSERT OR IGNORE INTO routine_exercises (routine_id, exercise_id, sort_order)
-        SELECT routine_id, id, id
-        FROM exercises
-        WHERE routine_id IS NOT NULL;
-      `);
-    }
-  }
-}
 
 async function seedDefaults(db) {
   const defaultRoutines = [
@@ -137,7 +96,6 @@ async function initializeDatabase() {
 
   await db.execAsync(SCHEMA_SQL);
 
-  await migrateIfNeeded(db);
   await seedDefaults(db);
 
   // Deja el orden de cada día en 1..n. Es idempotente y arregla los

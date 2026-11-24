@@ -23,10 +23,12 @@ import {
 import ExerciseEditorModal from '../components/exercise-editor-modal';
 import ConfirmDialog from '../components/confirm-dialog';
 import ScreenHeader from '../components/screen-header';
-import { cardShadow, colors, radius, spacing } from '../constants/app-theme';
+import { radius, spacing } from '../constants/app-theme';
 import { formatInitialWeight } from '../utils/format';
+import { useStyles } from '../components/theme-provider';
 
 export default function ExercisesCatalogScreen() {
+  const { styles, colors } = useStyles(createStyles);
   const router = useRouter();
 
   const [routines, setRoutines] = useState([]);
@@ -202,7 +204,7 @@ export default function ExercisesCatalogScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.centerBox}>
-          <ActivityIndicator size="large" color="#10b981" />
+          <ActivityIndicator size="large" color={colors.primary} />
           <Text style={styles.helperText}>Cargando catálogo...</Text>
         </View>
       </SafeAreaView>
@@ -230,7 +232,7 @@ export default function ExercisesCatalogScreen() {
           <TextInput
             style={styles.input}
             placeholder="Ej: Peso muerto rumano"
-            placeholderTextColor="#64748b"
+            placeholderTextColor={colors.textFaint}
             value={name}
             onChangeText={setName}
           />
@@ -251,7 +253,7 @@ export default function ExercisesCatalogScreen() {
                 style={styles.input}
                 keyboardType="decimal-pad"
                 placeholder="Opcional"
-                placeholderTextColor="#64748b"
+                placeholderTextColor={colors.textFaint}
                 value={initialWeight}
                 onChangeText={setInitialWeight}
               />
@@ -343,7 +345,7 @@ export default function ExercisesCatalogScreen() {
               <TextInput
                 style={styles.searchInput}
                 placeholder="Buscar por nombre..."
-                placeholderTextColor="#64748b"
+                placeholderTextColor={colors.textFaint}
                 value={search}
                 onChangeText={setSearch}
                 autoCorrect={false}
@@ -467,7 +469,8 @@ export default function ExercisesCatalogScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) =>
+  StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.bg,
@@ -509,7 +512,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing.lg,
     gap: 10,
-    ...cardShadow,
+    ...colors.cardShadow,
   },
   sectionTitle: {
     fontSize: 18,
@@ -520,26 +523,26 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#cbd5e1',
+    color: colors.textSecondary,
   },
   input: {
-    backgroundColor: '#090d0b',
+    backgroundColor: colors.bg,
     borderWidth: 1,
-    borderColor: '#1f3328',
+    borderColor: colors.border,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    color: '#ecfdf5',
+    color: colors.text,
     fontSize: 15,
   },
   searchInput: {
-    backgroundColor: '#090d0b',
+    backgroundColor: colors.bg,
     borderWidth: 1,
-    borderColor: '#1f3328',
+    borderColor: colors.border,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    color: '#ecfdf5',
+    color: colors.text,
     fontSize: 15,
   },
   rowInputs: {
@@ -557,47 +560,47 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   dayChip: {
-    backgroundColor: '#090d0b',
+    backgroundColor: colors.bg,
     borderWidth: 1,
-    borderColor: '#1f3328',
+    borderColor: colors.border,
     borderRadius: 999,
     paddingVertical: 7,
     paddingHorizontal: 12,
   },
   dayChipActive: {
-    backgroundColor: '#064e3b',
-    borderColor: '#10b981',
+    backgroundColor: colors.primarySoft,
+    borderColor: colors.primary,
   },
   dayChipText: {
-    color: '#cbd5e1',
+    color: colors.textSecondary,
     fontSize: 13,
     fontWeight: '600',
   },
   dayChipTextActive: {
-    color: '#34d399',
+    color: colors.primaryText,
     fontWeight: '700',
   },
   primaryButton: {
-    backgroundColor: '#059669',
+    backgroundColor: colors.primaryStrong,
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
     marginTop: 6,
   },
   primaryButtonText: {
-    color: '#ecfdf5',
+    color: colors.onPrimary,
     fontWeight: '700',
     fontSize: 15,
   },
   statusBox: {
-    backgroundColor: '#111a15',
+    backgroundColor: colors.surface,
     borderLeftWidth: 4,
-    borderLeftColor: '#10b981',
+    borderLeftColor: colors.primary,
     padding: 12,
     borderRadius: 10,
   },
   statusText: {
-    color: '#d1fae5',
+    color: colors.textSecondary,
     fontSize: 14,
     fontWeight: '600',
   },
@@ -616,7 +619,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: 14,
     gap: spacing.sm,
-    ...cardShadow,
+    ...colors.cardShadow,
   },
   exerciseTop: {
     flexDirection: 'row',
@@ -630,11 +633,11 @@ const styles = StyleSheet.create({
   exerciseName: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#ecfdf5',
+    color: colors.text,
   },
   exerciseMeta: {
     fontSize: 12,
-    color: '#34d399',
+    color: colors.primaryText,
     fontWeight: '600',
   },
   cardActions: {
@@ -642,47 +645,47 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   smallButton: {
-    backgroundColor: '#090d0b',
+    backgroundColor: colors.bg,
     borderWidth: 1,
-    borderColor: '#1f3328',
+    borderColor: colors.border,
     borderRadius: 8,
     paddingVertical: 6,
     paddingHorizontal: 9,
   },
   smallButtonText: {
-    color: '#d1fae5',
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: '700',
   },
   smallButtonDanger: {
-    borderColor: 'rgba(239, 68, 68, 0.5)',
+    borderColor: colors.dangerBorder,
   },
   smallButtonDangerText: {
-    color: '#f87171',
+    color: colors.danger,
   },
   assignHint: {
     fontSize: 12,
-    color: '#94a3b8',
+    color: colors.textMuted,
   },
   miniDayChip: {
-    backgroundColor: '#090d0b',
+    backgroundColor: colors.bg,
     borderWidth: 1,
-    borderColor: '#1f3328',
+    borderColor: colors.border,
     borderRadius: 8,
     paddingVertical: 5,
     paddingHorizontal: 10,
   },
   miniDayChipActive: {
-    backgroundColor: '#064e3b',
-    borderColor: '#10b981',
+    backgroundColor: colors.primarySoft,
+    borderColor: colors.primary,
   },
   miniDayChipText: {
-    color: '#94a3b8',
+    color: colors.textMuted,
     fontSize: 12,
     fontWeight: '600',
   },
   miniDayChipTextActive: {
-    color: '#6ee7b7',
+    color: colors.primaryText,
     fontWeight: '700',
   },
   centerBox: {
@@ -692,7 +695,7 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   helperText: {
-    color: '#d1fae5',
+    color: colors.textSecondary,
     marginTop: 12,
     fontSize: 15,
   },

@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  Share,
   StyleSheet,
   ActivityIndicator,
 } from 'react-native';
@@ -14,17 +15,19 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { getDatabase } from '../db/database';
 import { getRoutines, getTodayRoutine } from '../db/routines';
+import { createBackup, serializeBackup } from '../db/backup';
 import {
   getProgressionSuggestions,
   getWorkoutData,
   saveWorkout,
 } from '../db/workout';
 import { getDayLabel, getTodayCode } from '../constants/weekdays';
-import { colors, radius, spacing, cardShadow } from '../constants/app-theme';
+import { radius, spacing } from '../constants/app-theme';
 import { RIR_OPTIONS, WEIGHT_STEP } from '../constants/training';
 import SettingsDrawer from '../components/settings-drawer';
 import ProgressBar from '../components/progress-bar';
 import WorkoutSummaryModal from '../components/workout-summary-modal';
+import RestoreBackupModal from '../components/restore-backup-modal';
 import {
   formatTodayLong,
   formatWeight,
@@ -48,6 +51,7 @@ import {
   sanitizeRepsInput,
   sanitizeWeightInput,
 } from '../utils/workout-draft';
+import { useAppTheme, useStyles } from '../components/theme-provider';
 
 function ExerciseCard({
   exercise,
@@ -65,9 +69,11 @@ function ExerciseCard({
   onApplySuggestion,
   onChangeRir,
 }) {
+  const { styles, colors } = useStyles(createStyles);
   const complete = isExerciseComplete(sets);
   const filled = sets.filter(isSetFilled).length;
   const lastText = describeLastSets(lastSets, formatWeight);
+  const lastDate = formatDateShort(lastSets?.[0]?.date);
 
   return (
     <View style={[styles.exerciseCard, complete && styles.exerciseCardDone]}>
@@ -99,14 +105,17 @@ function ExerciseCard({
 
       {collapsed ? null : (
         <View style={styles.exerciseBody}>
-          {lastText ? (
-            <View style={styles.lastRow}>
-              <Text style={styles.lastLabel}>Última vez</Text>
-              <Text style={styles.lastValue} numberOfLines={1}>
-                {lastText}
-              </Text>
-            </View>
-          ) : null}
+          <View style={styles.lastRow}>
+            <Text style={styles.lastLabel}>
+              {lastText && lastDate ? `Última · ${lastDate}` : 'Última vez'}
+            </Text>
+            <Text
+              style={[styles.lastValue, !lastText && styles.lastValueEmpty]}
+              numberOfLines={1}
+            >
+              {lastText || 'Sin sesión previa'}
+            </Text>
+          </View>
 
           {suggestion != null ? (
             <View style={styles.suggestionBox}>
@@ -264,7 +273,9 @@ function ExerciseCard({
 }
 
 export default function IndexScreen() {
+  const { styles, colors } = useStyles(createStyles);
   const router = useRouter();
+  const { reloadTheme } = useAppTheme();
 
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState(null);
@@ -286,6 +297,8 @@ export default function IndexScreen() {
 
   const [saving, setSaving] = useState(false);
   const [summary, setSummary] = useState(null);
+  const [confirmingFinish, setConfirmingFinish] = useState(false);
+  const [restoreOpen, setRestoreOpen] = useState(false);
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [progressionWeeks, setProgressionWeeks] = useState(2);
@@ -299,6 +312,8 @@ export default function IndexScreen() {
   const loadedDateRef = useRef(toISODate());
   const draftsRef = useRef({});
   const rirRef = useRef({});
+  const confirmTimerRef = useRef(null);
+  const confirmArmedAtRef = useRef(0);
 
   const updateDrafts = useCallback((updater) => {
     setDrafts((previous) => {
@@ -506,6 +521,61 @@ export default function IndexScreen() {
     loadData({ reset: true });
   };
 
+  // Finalizar pide dos toques: el primero arma la confirmación (vence a los
+  // 5 s) y el segundo cierra el entrenamiento. Un doble toque accidental
+  // inmediato no cuenta como confirmación.
+  const cancelFinish = () => {
+    clearTimeout(confirmTimerRef.current);
+    setConfirmingFinish(false);
+  };
+
+  const handleFinishPress = () => {
+    if (saving || !activeRoutine) return;
+
+    if (!confirmingFinish) {
+      setConfirmingFinish(true);
+      confirmArmedAtRef.current = Date.now();
+      clearTimeout(confirmTimerRef.current);
+      confirmTimerRef.current = setTimeout(
+        () => setConfirmingFinish(false),
+        5000
+      );
+      return;
+    }
+
+    if (Date.now() - confirmArmedAtRef.current < 600) return;
+
+    cancelFinish();
+    handleFinish();
+  };
+
+  const handleExportBackup = () => {
+    // Esperamos a que el panel de ajustes termine de cerrarse
+    setTimeout(async () => {
+      try {
+        const db = await getDatabase();
+        const backup = await createBackup(db);
+        await Share.share({
+          title: `Respaldo My Gym ${toISODate()}`,
+          message: serializeBackup(backup),
+        });
+      } catch (err) {
+        console.error('Error exportando la copia de seguridad:', err);
+        setStatusMsg('No se pudo exportar la copia de seguridad.');
+      }
+    }, 400);
+  };
+
+  const handleOpenRestore = () => {
+    setTimeout(() => setRestoreOpen(true), 350);
+  };
+
+  const handleRestored = async () => {
+    setStatusMsg(null);
+    await reloadTheme();
+    await loadData({ reset: true });
+  };
+
   const handleFinish = async () => {
     if (saving || !activeRoutine) return;
 
@@ -568,6 +638,14 @@ export default function IndexScreen() {
     activeRoutine && todayRoutine && activeRoutine.id === todayRoutine.id
   );
   const warmupSteps = parseWarmupSteps(activeRoutine?.warmup);
+
+  // Si cambia algo del entrenamiento, se cancela una confirmación pendiente.
+  useEffect(() => {
+    clearTimeout(confirmTimerRef.current);
+    setConfirmingFinish(false);
+  }, [drafts, rirByExercise, allDone]);
+
+  useEffect(() => () => clearTimeout(confirmTimerRef.current), []);
 
   if (loading) {
     return (
@@ -853,24 +931,54 @@ export default function IndexScreen() {
 
         {allDone ? (
           <View style={styles.finishBar}>
-            <TouchableOpacity
-              style={[styles.finishButton, saving && styles.finishButtonBusy]}
-              onPress={handleFinish}
-              disabled={saving}
-              activeOpacity={0.88}
-              accessibilityRole="button"
-              accessibilityLabel="Finalizar entrenamiento de hoy"
-            >
-              {saving ? (
-                <ActivityIndicator color={colors.text} />
-              ) : (
-                <Text style={styles.finishText}>
-                  {alreadySaved
-                    ? 'Actualizar entrenamiento'
-                    : 'Finalizar entrenamiento de hoy'}
-                </Text>
-              )}
-            </TouchableOpacity>
+            <View style={styles.finishRow}>
+              {confirmingFinish && !saving ? (
+                <TouchableOpacity
+                  style={styles.finishCancel}
+                  onPress={cancelFinish}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cancelar finalización"
+                >
+                  <Text style={styles.finishCancelText}>Cancelar</Text>
+                </TouchableOpacity>
+              ) : null}
+
+              <TouchableOpacity
+                style={[
+                  styles.finishButton,
+                  styles.finishButtonFlex,
+                  confirmingFinish && styles.finishButtonConfirm,
+                  saving && styles.finishButtonBusy,
+                ]}
+                onPress={handleFinishPress}
+                disabled={saving}
+                activeOpacity={0.88}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  confirmingFinish
+                    ? 'Confirmar: finalizar entrenamiento de hoy'
+                    : 'Finalizar entrenamiento de hoy'
+                }
+              >
+                {saving ? (
+                  <ActivityIndicator color={colors.onPrimary} />
+                ) : (
+                  <Text
+                    style={[
+                      styles.finishText,
+                      confirmingFinish && styles.finishTextConfirm,
+                    ]}
+                  >
+                    {confirmingFinish
+                      ? 'Tocá de nuevo para confirmar'
+                      : alreadySaved
+                        ? 'Actualizar entrenamiento'
+                        : 'Finalizar entrenamiento de hoy'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
         ) : null}
       </KeyboardAvoidingView>
@@ -885,6 +993,14 @@ export default function IndexScreen() {
         sessionsCount={sessionsCount}
         routinesCount={routines.length}
         onNavigate={(path) => router.push(path)}
+        onExportBackup={handleExportBackup}
+        onRestoreBackup={handleOpenRestore}
+      />
+
+      <RestoreBackupModal
+        visible={restoreOpen}
+        onClose={() => setRestoreOpen(false)}
+        onRestored={handleRestored}
       />
 
       <WorkoutSummaryModal
@@ -899,7 +1015,8 @@ export default function IndexScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) =>
+  StyleSheet.create({
   flex: {
     flex: 1,
   },
@@ -978,7 +1095,7 @@ const styles = StyleSheet.create({
     borderColor: colors.primaryBorder,
     padding: spacing.lg,
     gap: spacing.md,
-    ...cardShadow,
+    ...colors.cardShadow,
   },
   todayTop: {
     flexDirection: 'row',
@@ -1109,7 +1226,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     overflow: 'hidden',
-    ...cardShadow,
+    ...colors.cardShadow,
   },
   exerciseCardDone: {
     borderColor: colors.primaryBorder,
@@ -1185,6 +1302,10 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: 12,
   },
+  lastValueEmpty: {
+    color: colors.textFaint,
+    fontStyle: 'italic',
+  },
   suggestionBox: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1216,7 +1337,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primaryStrong,
   },
   suggestionButtonText: {
-    color: colors.text,
+    color: colors.onPrimary,
     fontSize: 12,
     fontWeight: '800',
   },
@@ -1386,13 +1507,44 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.primaryStrong,
-    ...cardShadow,
+    ...colors.cardShadow,
+  },
+  finishRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  finishButtonFlex: {
+    flex: 1,
+  },
+  finishButtonConfirm: {
+    backgroundColor: colors.primarySoft,
+    borderWidth: 2,
+    borderColor: colors.primary,
+  },
+  finishTextConfirm: {
+    color: colors.primaryText,
+    fontSize: 15,
+  },
+  finishCancel: {
+    minHeight: 54,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  finishCancelText: {
+    color: colors.textSecondary,
+    fontSize: 14,
+    fontWeight: '700',
   },
   finishButtonBusy: {
     opacity: 0.7,
   },
   finishText: {
-    color: colors.text,
+    color: colors.onPrimary,
     fontSize: 16,
     fontWeight: '800',
     letterSpacing: -0.2,
@@ -1405,7 +1557,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     padding: spacing.xxl,
     gap: spacing.sm,
-    ...cardShadow,
+    ...colors.cardShadow,
   },
   restGlyph: {
     color: colors.primaryText,
@@ -1475,7 +1627,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     padding: spacing.xl,
     gap: spacing.sm,
-    ...cardShadow,
+    ...colors.cardShadow,
   },
   emptyTitle: {
     color: colors.text,
@@ -1495,7 +1647,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primaryStrong,
   },
   primaryButtonText: {
-    color: colors.text,
+    color: colors.onPrimary,
     fontSize: 14,
     fontWeight: '800',
   },
@@ -1530,7 +1682,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primaryStrong,
   },
   retryText: {
-    color: colors.text,
+    color: colors.onPrimary,
     fontSize: 13,
     fontWeight: '800',
   },

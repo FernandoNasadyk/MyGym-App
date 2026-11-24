@@ -20,11 +20,12 @@ import {
   updateRoutine,
 } from '../db/routines';
 import { getDayLabel } from '../constants/weekdays';
-import { colors, radius, spacing, cardShadow } from '../constants/app-theme';
+import { radius, spacing } from '../constants/app-theme';
 import ScreenHeader from '../components/screen-header';
 import RoutineFormModal from '../components/routine-form-modal';
 import ConfirmDialog from '../components/confirm-dialog';
 import { formatDateShort } from '../utils/format';
+import { useStyles } from '../components/theme-provider';
 
 function RoutineCard({
   routine,
@@ -38,6 +39,7 @@ function RoutineCard({
   onEdit,
   onDelete,
 }) {
+  const { styles } = useStyles(createStyles);
   const exerciseCount = routine.exercise_count;
   const preview = names.slice(0, 3).join(' · ');
   const remaining = names.length - 3;
@@ -149,6 +151,7 @@ function RoutineCard({
 }
 
 export default function RoutinesScreen() {
+  const { styles, colors } = useStyles(createStyles);
   const router = useRouter();
 
   const [routines, setRoutines] = useState([]);
@@ -400,7 +403,8 @@ export default function RoutinesScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) =>
+  StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.bg,
@@ -481,7 +485,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     overflow: 'hidden',
-    ...cardShadow,
+    ...colors.cardShadow,
   },
   cardToday: {
     borderColor: colors.primaryBorder,
@@ -632,7 +636,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     padding: spacing.xl,
     gap: spacing.sm,
-    ...cardShadow,
+    ...colors.cardShadow,
   },
   emptyTitle: {
     color: colors.text,
@@ -652,7 +656,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primaryStrong,
   },
   primaryButtonText: {
-    color: colors.text,
+    color: colors.onPrimary,
     fontSize: 14,
     fontWeight: '800',
   },

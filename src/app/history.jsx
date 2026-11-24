@@ -15,7 +15,7 @@ import {
   getHistoryTotals,
   getRecentSessions,
 } from '../db/history';
-import { colors, radius, spacing, cardShadow } from '../constants/app-theme';
+import { radius, spacing } from '../constants/app-theme';
 import ScreenHeader from '../components/screen-header';
 import {
   formatRelativeDate,
@@ -24,12 +24,14 @@ import {
   formatWeight,
   getDateBadgeParts,
 } from '../utils/format';
+import { useStyles } from '../components/theme-provider';
 
 const PAGE_SIZE = 10;
 
 const EMPTY_TOTALS = { sessions: 0, sets: 0, volume: 0, bestWeight: 0 };
 
 function StatBlock({ label, value }) {
+  const { styles } = useStyles(createStyles);
   return (
     <View style={styles.statBlock}>
       <Text style={styles.statValue} numberOfLines={1}>
@@ -41,6 +43,7 @@ function StatBlock({ label, value }) {
 }
 
 export default function HistoryScreen() {
+  const { styles, colors } = useStyles(createStyles);
   const router = useRouter();
 
   const [sessions, setSessions] = useState([]);
@@ -427,7 +430,8 @@ export default function HistoryScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) =>
+  StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.bg,
@@ -469,7 +473,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primaryStrong,
   },
   retryText: {
-    color: colors.text,
+    color: colors.onPrimary,
     fontSize: 13,
     fontWeight: '700',
   },
@@ -480,7 +484,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     padding: spacing.xl,
     gap: spacing.sm,
-    ...cardShadow,
+    ...colors.cardShadow,
   },
   emptyTitle: {
     color: colors.text,
@@ -500,7 +504,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primaryStrong,
   },
   primaryButtonText: {
-    color: colors.text,
+    color: colors.onPrimary,
     fontSize: 14,
     fontWeight: '800',
   },
@@ -512,7 +516,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     paddingVertical: spacing.md,
-    ...cardShadow,
+    ...colors.cardShadow,
   },
   statBlock: {
     flex: 1,
@@ -562,7 +566,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     overflow: 'hidden',
-    ...cardShadow,
+    ...colors.cardShadow,
   },
   sessionHeader: {
     flexDirection: 'row',

@@ -7,7 +7,13 @@
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { SCHEMA_SQL } from '../src/db/schema.js';
-import { addMissingColumns } from '../src/db/migrations.js';
+import {
+  createBackup,
+  parseBackup,
+  restoreBackup,
+  serializeBackup,
+  summarizeBackup,
+} from '../src/db/backup.js';
 import { WEIGHT_STEP } from '../src/constants/training.js';
 import {
   appendExerciseToDay,
@@ -450,8 +456,6 @@ test('no se puede repetir nombre y se puede editar', async () => {
   assert.equal(updated.name, 'Remo con barra');
   assert.equal(Number(updated.default_sets), 4);
   assert.equal(Number(updated.initial_weight), 45);
-  // El salto de peso ya no se edita por ejercicio: la columna queda en su valor por defecto
-  assert.equal(Number(updated.weight_step), 2.5);
 
   await assert.rejects(
     () =>
@@ -813,8 +817,7 @@ test('progresión: cambiar el peso reinicia el período y el salto es fijo', asy
   const db = createAdapter();
   await db.execAsync(SCHEMA_SQL);
   await seedTrainingData(db);
-  // Aunque la columna legacy weight_step tenga otro valor, el salto es 2,5 kg
-  await db.runAsync('UPDATE exercises SET weight_step = 5 WHERE id = 1;');
+  // El salto es fijo (no hay columna por ejercicio)
   assert.equal(WEIGHT_STEP, 2.5);
 
   await logSession(db, '2026-11-02', 60, 10);
@@ -890,8 +893,8 @@ test('historial completo: paginado, filtro por ejercicio y totales', async () =>
 
 test('borradores del entrenamiento: completar, finalizar y ajustar pesos', () => {
   const exercises = [
-    { id: 1, default_sets: 2, weight_step: 2.5 },
-    { id: 2, default_sets: 3, weight_step: 5 },
+    { id: 1, default_sets: 2 },
+    { id: 2, default_sets: 3 },
   ];
   const lastLogs = new Map([
     [1, [{ setNumber: 1, weight: 60, reps: 8 }, { setNumber: 2, weight: 57.5, reps: 7 }]],
@@ -955,7 +958,6 @@ test('peso inicial: se guarda en el catálogo y se precarga al entrenar', async 
 
   const stored = await db.getFirstAsync('SELECT * FROM exercises WHERE id = ?', [press]);
   assert.equal(Number(stored.initial_weight), 42.5);
-  assert.equal(Number(stored.weight_step), 2.5);
   assert.equal(
     Number((await db.getFirstAsync('SELECT * FROM exercises WHERE id = ?', [remo])).initial_weight),
     0
@@ -1073,35 +1075,111 @@ test('RIR: se guarda por ejercicio, es opcional y se restaura al volver', async 
   );
 });
 
-test('migración: una base anterior suma peso inicial y RIR sin perder datos', async () => {
+test('esquema limpio: sin columna de salto de peso y con peso inicial y RIR', async () => {
   const db = createAdapter();
-  // Esquema de la versión anterior (sin initial_weight ni rir)
-  await db.execAsync(`
-    CREATE TABLE routines (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, day_code TEXT NOT NULL UNIQUE, is_extra INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0, warmup TEXT NOT NULL DEFAULT '');
-    CREATE TABLE exercises (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, default_sets INTEGER NOT NULL DEFAULT 2, min_reps INTEGER NOT NULL DEFAULT 6, max_reps INTEGER NOT NULL DEFAULT 10, weight_step REAL NOT NULL DEFAULT 2.5, is_active INTEGER NOT NULL DEFAULT 1);
-    CREATE TABLE workout_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, routine_id INTEGER NOT NULL, session_date TEXT NOT NULL, notes TEXT);
-    CREATE TABLE set_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id INTEGER NOT NULL, exercise_id INTEGER NOT NULL, set_number INTEGER NOT NULL, weight REAL NOT NULL, reps INTEGER NOT NULL, completed_at TEXT NOT NULL);
-    INSERT INTO routines (name, day_code) VALUES ('Lunes', 'LUN');
-    INSERT INTO exercises (name, weight_step) VALUES ('Press banca', 5);
-    INSERT INTO workout_sessions (routine_id, session_date) VALUES (1, '2026-11-09');
-    INSERT INTO set_logs (session_id, exercise_id, set_number, weight, reps, completed_at) VALUES (1, 1, 1, 60, 10, '2026-11-09T10:00:00.000Z');
-  `);
+  await db.execAsync(SCHEMA_SQL);
+  await db.execAsync(SCHEMA_SQL); // idempotente
 
-  await addMissingColumns(db);
-  await addMissingColumns(db); // idempotente
+  const columns = async (table) =>
+    (await db.getAllAsync(`PRAGMA table_info(${table});`)).map((c) => c.name);
 
-  const exercise = await db.getFirstAsync('SELECT * FROM exercises WHERE id = 1;');
-  assert.equal(exercise.name, 'Press banca');
-  assert.equal(Number(exercise.initial_weight), 0);
-  const log = await db.getFirstAsync('SELECT * FROM set_logs WHERE id = 1;');
-  assert.equal(Number(log.weight), 60);
-  assert.equal(log.rir, null);
+  assert.deepEqual(await columns('exercises'), [
+    'id', 'name', 'default_sets', 'min_reps', 'max_reps', 'initial_weight', 'is_active',
+  ]);
+  assert.ok((await columns('set_logs')).includes('rir'));
+  assert.ok((await columns('routines')).includes('warmup'));
+});
 
-  // Y sobre esa base ya se puede guardar con RIR
-  await db.runAsync('UPDATE set_logs SET rir = 2 WHERE id = 1;');
-  assert.equal(Number((await db.getFirstAsync('SELECT rir FROM set_logs WHERE id = 1;')).rir), 2);
-  const columns = (await db.getAllAsync('PRAGMA table_info(exercises);')).map((c) => c.name);
-  assert.equal(columns.filter((name) => name === 'initial_weight').length, 1);
+test('última sesión previa: excluye la de hoy e incluye fecha y RIR', async () => {
+  const db = createAdapter();
+  await db.execAsync(SCHEMA_SQL);
+  await seedTrainingData(db);
+
+  // Sin historial: no rompe y no hay referencia
+  let data = await getWorkoutData(db, 1, '2026-11-09');
+  assert.equal(data.lastLogs.get(1), undefined);
+  assert.equal(describeLastSets(data.lastLogs.get(1)), '');
+
+  await saveWorkout(db, {
+    routineId: 1,
+    date: '2026-11-02',
+    entries: [{ exerciseId: 1, rir: 2, sets: [{ weight: '60', reps: '8' }, { weight: '60', reps: '7' }] }],
+  });
+  await saveWorkout(db, {
+    routineId: 1,
+    date: '2026-11-09',
+    entries: [{ exerciseId: 1, sets: [{ weight: '62.5', reps: '6' }] }],
+  });
+
+  // El día 09 la referencia es la sesión del 02 (no la de ese mismo día)
+  data = await getWorkoutData(db, 1, '2026-11-09');
+  const last = data.lastLogs.get(1);
+  assert.equal(last[0].date, '2026-11-02');
+  assert.equal(describeLastSets(last), '60 kg × 8 · 7 · RIR 2');
+
+  // Un día posterior toma la del 09 (sin RIR)
+  data = await getWorkoutData(db, 1, '2026-11-16');
+  assert.equal(data.lastLogs.get(1)[0].date, '2026-11-09');
+  assert.equal(describeLastSets(data.lastLogs.get(1)), '62.5 kg × 6');
+  assert.equal(data.lastLogs.get(2), undefined);
+});
+
+test('respaldo: exporta, restaura y deja la base intacta si la copia falla', async () => {
+  const src = createAdapter();
+  await src.execAsync(SCHEMA_SQL);
+  await seedTrainingData(src);
+  await saveWorkout(src, {
+    routineId: 1,
+    date: '2026-11-02',
+    entries: [{ exerciseId: 1, rir: 3, sets: [{ weight: '60', reps: '8' }] }],
+  });
+  await src.runAsync("INSERT OR REPLACE INTO app_settings (id, theme, progression_weeks) VALUES (1, 'light', 1);");
+
+  const text = serializeBackup(await createBackup(src, new Date('2026-11-24T12:00:00Z')));
+  const backup = parseBackup(`  ${text}\n`);
+  assert.deepEqual(
+    { ...summarizeBackup(backup), createdAt: undefined },
+    { createdAt: undefined, routines: backup.tables.routines.rows.length, exercises: backup.tables.exercises.rows.length, sessions: 1, sets: 1 }
+  );
+
+  // Restaurar sobre otra base con datos distintos la reemplaza por completo
+  const dst = createAdapter();
+  await dst.execAsync(SCHEMA_SQL);
+  await dst.runAsync("INSERT INTO exercises (name) VALUES ('Otro ejercicio');");
+  await restoreBackup(dst, backup);
+
+  for (const table of ['routines', 'exercises', 'routine_exercises', 'workout_sessions', 'set_logs', 'app_settings']) {
+    assert.deepEqual(
+      await dst.getAllAsync(`SELECT * FROM ${table} ORDER BY id;`),
+      await src.getAllAsync(`SELECT * FROM ${table} ORDER BY id;`),
+      table
+    );
+  }
+  assert.equal((await dst.getFirstAsync('SELECT theme FROM app_settings WHERE id = 1;')).theme, 'light');
+  assert.equal(Number((await dst.getFirstAsync('SELECT rir FROM set_logs;')).rir), 3);
+
+  // Entradas inválidas
+  for (const bad of ['', 'hola', '{}', '{"format":"otro"}', JSON.stringify({ ...backup, version: 99 }),
+    JSON.stringify({ ...backup, tables: { ...backup.tables, set_logs: { columns: ['id'], rows: [] } } })]) {
+    assert.throws(() => parseBackup(bad), /copia|versión/i);
+  }
+
+  // Una copia con referencias rotas falla y no toca los datos actuales
+  const broken = JSON.parse(text);
+  const sl = broken.tables.set_logs;
+  sl.rows[0][sl.columns.indexOf('exercise_id')] = 999;
+  const before = await dst.getAllAsync('SELECT * FROM set_logs;');
+  await assert.rejects(() => restoreBackup(dst, parseBackup(JSON.stringify(broken))));
+  assert.deepEqual(await dst.getAllAsync('SELECT * FROM set_logs;'), before);
+  assert.equal((await dst.getAllAsync('SELECT * FROM exercises;')).length, backup.tables.exercises.rows.length);
+
+  // Una copia de una versión anterior (sin rir ni peso inicial) también restaura
+  const old = JSON.parse(text);
+  old.tables.set_logs = { columns: old.tables.set_logs.columns.filter((c) => c !== 'rir'), rows: old.tables.set_logs.rows.map((r) => r.filter((_, i) => old.tables.set_logs.columns[i] !== 'rir')) };
+  old.tables.exercises = { columns: old.tables.exercises.columns.filter((c) => c !== 'initial_weight'), rows: old.tables.exercises.rows.map((r) => r.filter((_, i) => old.tables.exercises.columns[i] !== 'initial_weight')) };
+  await restoreBackup(dst, parseBackup(JSON.stringify(old)));
+  assert.equal((await dst.getFirstAsync('SELECT rir FROM set_logs;')).rir, null);
+  assert.equal(Number((await dst.getFirstAsync('SELECT initial_weight FROM exercises WHERE id = 1;')).initial_weight), 0);
 });
 
 async function main() {

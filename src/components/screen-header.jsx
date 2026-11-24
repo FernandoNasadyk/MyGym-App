@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { colors, radius, spacing } from '../constants/app-theme';
+import { radius, spacing } from '../constants/app-theme';
+import { useStyles } from './theme-provider';
 
 /**
  * Encabezado común de las pantallas internas: botón de volver, etiqueta
@@ -14,6 +15,7 @@ export default function ScreenHeader({
   backLabel = 'Inicio',
   right = null,
 }) {
+  const { styles } = useStyles(createStyles);
   return (
     <View style={styles.wrapper}>
       {onBack ? (
@@ -44,7 +46,8 @@ export default function ScreenHeader({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) =>
+  StyleSheet.create({
   wrapper: {
     gap: spacing.md,
   },

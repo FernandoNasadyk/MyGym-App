@@ -6,10 +6,12 @@ import {
   TouchableOpacity,
   StyleSheet,
 } from 'react-native';
-import { colors, radius, spacing } from '../constants/app-theme';
+import { radius, spacing } from '../constants/app-theme';
 import { formatNumber } from '../utils/format';
+import { useStyles } from './theme-provider';
 
 function SummaryStat({ label, value }) {
+  const { styles } = useStyles(createStyles);
   return (
     <View style={styles.stat}>
       <Text style={styles.statValue}>{value}</Text>
@@ -27,6 +29,7 @@ export default function WorkoutSummaryModal({
   onClose,
   onViewHistory,
 }) {
+  const { styles } = useStyles(createStyles);
   const exerciseCount = summary?.exerciseCount ?? 0;
   const setCount = summary?.setCount ?? 0;
   const volume = summary?.volume ?? 0;
@@ -83,7 +86,8 @@ export default function WorkoutSummaryModal({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) =>
+  StyleSheet.create({
   overlay: {
     flex: 1,
     alignItems: 'center',
@@ -171,7 +175,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primaryStrong,
   },
   primaryText: {
-    color: colors.text,
+    color: colors.onPrimary,
     fontSize: 14,
     fontWeight: '800',
   },

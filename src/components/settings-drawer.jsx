@@ -8,9 +8,11 @@ import {
   StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, radius, spacing } from '../constants/app-theme';
+import { radius, spacing } from '../constants/app-theme';
+import { useAppTheme, useStyles } from './theme-provider';
 
 function NavRow({ glyph, title, subtitle, onPress }) {
+  const { styles } = useStyles(createStyles);
   return (
     <TouchableOpacity
       style={styles.navRow}
@@ -34,8 +36,8 @@ function NavRow({ glyph, title, subtitle, onPress }) {
 }
 
 /**
- * Panel lateral de ajustes: accesos a rutinas, historial y catálogo, y la
- * preferencia de progresión.
+ * Panel lateral de ajustes: accesos a rutinas, historial y catálogo, la
+ * preferencia de progresión, el tema (claro/oscuro) y el respaldo de datos.
  */
 export default function SettingsDrawer({
   visible,
@@ -47,7 +49,12 @@ export default function SettingsDrawer({
   sessionsCount,
   routinesCount = 0,
   onNavigate,
+  onExportBackup,
+  onRestoreBackup,
 }) {
+  const { styles } = useStyles(createStyles);
+  const { mode, setMode } = useAppTheme();
+
   const navigateTo = (path) => {
     onClose();
     onNavigate(path);
@@ -161,6 +168,83 @@ export default function SettingsDrawer({
               </View>
             </View>
 
+            <Text style={styles.sectionLabel}>Apariencia</Text>
+
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Tema</Text>
+              <Text style={styles.cardHint}>
+                Elegí entre modo claro u oscuro. Los dos mantienen la identidad
+                verde de la app.
+              </Text>
+
+              <View style={styles.options}>
+                {[
+                  { value: 'light', label: '☀ Modo claro' },
+                  { value: 'dark', label: '☾ Modo oscuro' },
+                ].map((option) => {
+                  const active = mode === option.value;
+                  return (
+                    <TouchableOpacity
+                      key={option.value}
+                      style={[styles.option, active && styles.optionActive]}
+                      onPress={() => setMode(option.value)}
+                      activeOpacity={0.8}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                      accessibilityLabel={option.label}
+                    >
+                      <Text
+                        style={[
+                          styles.optionText,
+                          active && styles.optionTextActive,
+                        ]}
+                      >
+                        {option.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
+            <Text style={styles.sectionLabel}>Respaldo</Text>
+
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Copia de seguridad</Text>
+              <Text style={styles.cardHint}>
+                Exportá todos tus datos (rutinas, ejercicios, historial y
+                ajustes) para guardarlos donde quieras, o restaurá una copia
+                anterior. No necesita internet ni cuenta.
+              </Text>
+
+              <View style={styles.options}>
+                <TouchableOpacity
+                  style={styles.option}
+                  onPress={() => {
+                    onClose();
+                    onExportBackup?.();
+                  }}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Exportar copia de seguridad"
+                >
+                  <Text style={styles.optionText}>⇪ Exportar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.option}
+                  onPress={() => {
+                    onClose();
+                    onRestoreBackup?.();
+                  }}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Restaurar copia de seguridad"
+                >
+                  <Text style={styles.optionText}>⇩ Restaurar</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
             <Text style={styles.sectionLabel}>Datos</Text>
 
             <View style={styles.card}>
@@ -186,7 +270,8 @@ export default function SettingsDrawer({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) =>
+  StyleSheet.create({
   overlay: {
     flex: 1,
     flexDirection: 'row',

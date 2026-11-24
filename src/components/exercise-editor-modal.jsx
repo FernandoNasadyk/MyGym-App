@@ -11,6 +11,7 @@ import {
   StyleSheet,
 } from 'react-native';
 import { normalizeExerciseInput } from '../db/day-exercises';
+import { useStyles } from './theme-provider';
 
 /**
  * Modal para editar los datos base de un ejercicio (series, repeticiones,
@@ -25,6 +26,7 @@ export default function ExerciseEditorModal({
   onClose,
   onSave,
 }) {
+  const { styles, colors } = useStyles(createStyles);
   const [name, setName] = useState('');
   const [defaultSets, setDefaultSets] = useState('2');
   const [minReps, setMinReps] = useState('6');
@@ -110,7 +112,7 @@ export default function ExerciseEditorModal({
               value={name}
               onChangeText={setName}
               placeholder="Ej: Press banca"
-              placeholderTextColor="#64748b"
+              placeholderTextColor={colors.textFaint}
               autoCapitalize="sentences"
               returnKeyType="next"
             />
@@ -131,7 +133,7 @@ export default function ExerciseEditorModal({
                   style={styles.input}
                   keyboardType="decimal-pad"
                   placeholder="Opcional"
-                  placeholderTextColor="#64748b"
+                  placeholderTextColor={colors.textFaint}
                   value={initialWeight}
                   onChangeText={setInitialWeight}
                 />
@@ -199,7 +201,8 @@ export default function ExerciseEditorModal({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) =>
+  StyleSheet.create({
   overlay: {
     flex: 1,
     alignItems: 'center',
@@ -212,15 +215,15 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     left: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backgroundColor: colors.overlay,
   },
   card: {
     width: '100%',
     maxWidth: 420,
     maxHeight: '90%',
-    backgroundColor: '#111a15',
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: '#1f3328',
+    borderColor: colors.border,
     borderRadius: 16,
   },
   scrollContent: {
@@ -236,29 +239,29 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 19,
     fontWeight: '800',
-    color: '#ecfdf5',
+    color: colors.text,
   },
   closeButton: {
     padding: 6,
   },
   closeButtonText: {
-    color: '#94a3b8',
+    color: colors.textMuted,
     fontSize: 18,
     fontWeight: '700',
   },
   label: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#cbd5e1',
+    color: colors.textSecondary,
   },
   input: {
-    backgroundColor: '#090d0b',
+    backgroundColor: colors.bg,
     borderWidth: 1,
-    borderColor: '#1f3328',
+    borderColor: colors.border,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    color: '#ecfdf5',
+    color: colors.text,
     fontSize: 15,
   },
   rowInputs: {
@@ -272,18 +275,18 @@ const styles = StyleSheet.create({
   hint: {
     fontSize: 12,
     lineHeight: 17,
-    color: '#94a3b8',
+    color: colors.textMuted,
     marginTop: 2,
   },
   errorBox: {
-    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    backgroundColor: colors.dangerSoft,
     borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.55)',
+    borderColor: colors.dangerBorder,
     borderRadius: 10,
     padding: 10,
   },
   errorText: {
-    color: '#fca5a5',
+    color: colors.danger,
     fontSize: 13,
     lineHeight: 18,
   },
@@ -299,20 +302,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   cancelButton: {
-    backgroundColor: '#090d0b',
+    backgroundColor: colors.bg,
     borderWidth: 1,
-    borderColor: '#1f3328',
+    borderColor: colors.border,
   },
   saveButton: {
-    backgroundColor: '#059669',
+    backgroundColor: colors.primaryStrong,
   },
   cancelText: {
-    color: '#cbd5e1',
+    color: colors.textSecondary,
     fontWeight: '700',
     fontSize: 14,
   },
   saveText: {
-    color: '#ecfdf5',
+    color: colors.onPrimary,
     fontWeight: '800',
     fontSize: 14,
   },

@@ -11,7 +11,8 @@ import {
   StyleSheet,
 } from 'react-native';
 import { WEEKDAY_OPTIONS } from '../constants/weekdays';
-import { colors, radius, spacing } from '../constants/app-theme';
+import { radius, spacing } from '../constants/app-theme';
+import { useStyles } from './theme-provider';
 
 /**
  * Alta y edición de un día de entrenamiento.
@@ -23,6 +24,7 @@ export default function RoutineFormModal({
   onSubmit,
   onClose,
 }) {
+  const { styles, colors } = useStyles(createStyles);
   const isEditing = Boolean(routine);
 
   const [name, setName] = useState('');
@@ -191,7 +193,8 @@ export default function RoutineFormModal({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) =>
+  StyleSheet.create({
   overlay: {
     flex: 1,
     alignItems: 'center',
@@ -327,7 +330,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   saveText: {
-    color: colors.text,
+    color: colors.onPrimary,
     fontSize: 14,
     fontWeight: '800',
   },

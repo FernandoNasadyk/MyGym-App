@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, StyleSheet, View } from 'react-native';
-import { colors } from '../constants/app-theme';
+import { useStyles } from './theme-provider';
+
 
 /** Barra de progreso animada (0 a 1). */
 export default function ProgressBar({ progress = 0, height = 8 }) {
+  const { styles } = useStyles(createStyles);
   const [width, setWidth] = useState(0);
   const animation = useRef(new Animated.Value(0)).current;
   const clamped = Math.max(0, Math.min(1, progress));
@@ -36,7 +38,8 @@ export default function ProgressBar({ progress = 0, height = 8 }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) =>
+  StyleSheet.create({
   track: {
     width: '100%',
     backgroundColor: colors.surfaceHigh,
