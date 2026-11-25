@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  AppState,
   View,
   Text,
   TextInput,
@@ -16,6 +17,13 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { getDatabase } from '../db/database';
 import { getRoutines, getTodayRoutine } from '../db/routines';
 import { createBackup, serializeBackup } from '../db/backup';
+import {
+  applyDraftPayload,
+  buildDraftPayload,
+  deleteStaleDrafts,
+  getWorkoutDraft,
+  saveWorkoutDraft,
+} from '../db/drafts';
 import {
   getProgressionSuggestions,
   getWorkoutData,
@@ -299,12 +307,12 @@ export default function IndexScreen() {
   const [summary, setSummary] = useState(null);
   const [confirmingFinish, setConfirmingFinish] = useState(false);
   const [restoreOpen, setRestoreOpen] = useState(false);
+  const [draftNotice, setDraftNotice] = useState(null);
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [progressionWeeks, setProgressionWeeks] = useState(2);
   const [savingSetting, setSavingSetting] = useState(false);
   const [catalogCount, setCatalogCount] = useState(0);
-  const [sessionsCount, setSessionsCount] = useState(0);
 
   // Datos que las cargas necesitan sin volver a crear el callback.
   const chosenRoutineIdRef = useRef(null);
@@ -314,6 +322,14 @@ export default function IndexScreen() {
   const rirRef = useRef({});
   const confirmTimerRef = useRef(null);
   const confirmArmedAtRef = useRef(0);
+
+  // Borrador automático: qué se está mostrando y si la persona ya editó algo.
+  const loadedRoutineIdRef = useRef(null);
+  const workoutExercisesRef = useRef([]);
+  const dirtyRef = useRef(false);
+  const finishingRef = useRef(false);
+  const draftTimerRef = useRef(null);
+  const draftWriteRef = useRef(Promise.resolve());
 
   const updateDrafts = useCallback((updater) => {
     setDrafts((previous) => {
@@ -331,12 +347,54 @@ export default function IndexScreen() {
     });
   }, []);
 
+  // Cambios hechos por la persona (no por una carga): activan el borrador.
+  const editDrafts = useCallback(
+    (updater) => {
+      dirtyRef.current = true;
+      setDraftNotice(null);
+      updateDrafts(updater);
+    },
+    [updateDrafts]
+  );
+
+  // Escribe el borrador en SQLite. Las escrituras se encadenan para que
+  // finalizar la sesión siempre quede después de la última.
+  const persistDraft = useCallback(() => {
+    if (!dirtyRef.current || finishingRef.current) return draftWriteRef.current;
+
+    const routineId = loadedRoutineIdRef.current;
+    const date = loadedDateRef.current;
+    if (!routineId) return draftWriteRef.current;
+
+    const payload = buildDraftPayload(
+      workoutExercisesRef.current,
+      draftsRef.current,
+      rirRef.current
+    );
+
+    draftWriteRef.current = draftWriteRef.current
+      .then(async () => {
+        if (finishingRef.current) return;
+        const db = await getDatabase();
+        await saveWorkoutDraft(db, { routineId, date, payload });
+      })
+      .catch((err) => {
+        console.error('Error guardando el borrador:', err);
+      });
+    return draftWriteRef.current;
+  }, []);
+
   const loadData = useCallback(
     async ({ reset = false } = {}) => {
       try {
         setErrorMsg(null);
         const db = await getDatabase();
         const date = toISODate();
+
+        // Borradores de hace más de 2 días ya no sirven.
+        const staleLimit = new Date();
+        staleLimit.setDate(staleLimit.getDate() - 2);
+        await deleteStaleDrafts(db, toISODate(staleLimit));
 
         const settings = await db.getFirstAsync(
           'SELECT progression_weeks FROM app_settings WHERE id = 1;'
@@ -365,14 +423,10 @@ export default function IndexScreen() {
         );
         setCatalogCount(Number(catalogRow?.total) || 0);
 
-        const sessionRow = await db.getFirstAsync(
-          `SELECT COUNT(*) AS total FROM workout_sessions ws
-           WHERE EXISTS (SELECT 1 FROM set_logs sl WHERE sl.session_id = ws.id);`
-        );
-        setSessionsCount(Number(sessionRow?.total) || 0);
-
         if (!active) {
           loadedKeyRef.current = null;
+          loadedRoutineIdRef.current = null;
+          workoutExercisesRef.current = [];
           setWorkout({ exercises: [], lastLogs: new Map(), session: null });
           updateDrafts({});
           updateRir({});
@@ -391,6 +445,8 @@ export default function IndexScreen() {
         const sameWorkout = loadedKeyRef.current === key;
         loadedKeyRef.current = key;
         loadedDateRef.current = date;
+        loadedRoutineIdRef.current = active.id;
+        workoutExercisesRef.current = data.exercises;
 
         setWorkout({
           exercises: data.exercises,
@@ -407,8 +463,24 @@ export default function IndexScreen() {
         );
         const freshRir = buildInitialRir(data.exercises, data.savedLogs);
         if (reset || !sameWorkout) {
-          updateDrafts(fresh);
-          updateRir(freshRir);
+          // Si la app se cerró a medio entrenamiento, se recupera el borrador.
+          let startDrafts = fresh;
+          let startRir = freshRir;
+          let restored = false;
+          const draft = await getWorkoutDraft(db, active.id, date);
+          if (draft) {
+            ({
+              drafts: startDrafts,
+              rirByExercise: startRir,
+              restored,
+            } = applyDraftPayload(data.exercises, fresh, freshRir, draft));
+          }
+          dirtyRef.current = false;
+          setDraftNotice(
+            restored ? 'Recuperamos lo que estabas cargando.' : null
+          );
+          updateDrafts(startDrafts);
+          updateRir(startRir);
           // Al cargar el día: calentamiento y primer ejercicio abiertos, el
           // resto de los ejercicios contraídos.
           setCollapsed(buildInitialCollapsed(data.exercises));
@@ -454,7 +526,7 @@ export default function IndexScreen() {
 
   const handleChangeSet = (exerciseId, setIndex, field, value) => {
     setStatusMsg(null);
-    updateDrafts((previous) => ({
+    editDrafts((previous) => ({
       ...previous,
       [exerciseId]: previous[exerciseId].map((set, index) =>
         index === setIndex ? { ...set, [field]: value } : set
@@ -463,7 +535,7 @@ export default function IndexScreen() {
   };
 
   const handleStepWeight = (exercise, setIndex, direction) => {
-    updateDrafts((previous) => ({
+    editDrafts((previous) => ({
       ...previous,
       [exercise.id]: previous[exercise.id].map((set, index) =>
         index === setIndex
@@ -477,21 +549,21 @@ export default function IndexScreen() {
   };
 
   const handleAddSet = (exerciseId) => {
-    updateDrafts((previous) => ({
+    editDrafts((previous) => ({
       ...previous,
       [exerciseId]: addSet(previous[exerciseId]),
     }));
   };
 
   const handleRemoveSet = (exerciseId) => {
-    updateDrafts((previous) => ({
+    editDrafts((previous) => ({
       ...previous,
       [exerciseId]: removeLastSet(previous[exerciseId]),
     }));
   };
 
   const handleApplySuggestion = (exerciseId, weight) => {
-    updateDrafts((previous) => ({
+    editDrafts((previous) => ({
       ...previous,
       [exerciseId]: previous[exerciseId].map((set) => ({
         ...set,
@@ -502,6 +574,8 @@ export default function IndexScreen() {
 
   const handleChangeRir = (exerciseId, value) => {
     setStatusMsg(null);
+    dirtyRef.current = true;
+    setDraftNotice(null);
     updateRir((previous) => ({ ...previous, [exerciseId]: value }));
   };
 
@@ -582,6 +656,13 @@ export default function IndexScreen() {
     try {
       setSaving(true);
       setStatusMsg(null);
+
+      // Frenamos el borrador automático y esperamos su última escritura: el
+      // guardado de la sesión es el que borra el borrador.
+      finishingRef.current = true;
+      clearTimeout(draftTimerRef.current);
+      await draftWriteRef.current;
+
       const db = await getDatabase();
       const result = await saveWorkout(db, {
         routineId: activeRoutine.id,
@@ -592,11 +673,14 @@ export default function IndexScreen() {
           rirRef.current
         ),
       });
+      dirtyRef.current = false;
+      setDraftNotice(null);
       setSummary(result);
     } catch (err) {
       console.error('Error guardando el entrenamiento:', err);
       setStatusMsg(err?.message || 'No se pudo guardar el entrenamiento.');
     } finally {
+      finishingRef.current = false;
       setSaving(false);
     }
   };
@@ -646,6 +730,25 @@ export default function IndexScreen() {
   }, [drafts, rirByExercise, allDone]);
 
   useEffect(() => () => clearTimeout(confirmTimerRef.current), []);
+
+  // Borrador automático: se guarda poco después de cada cambio...
+  useEffect(() => {
+    if (!dirtyRef.current) return undefined;
+    clearTimeout(draftTimerRef.current);
+    draftTimerRef.current = setTimeout(persistDraft, 600);
+    return () => clearTimeout(draftTimerRef.current);
+  }, [drafts, rirByExercise, persistDraft]);
+
+  // ...y de inmediato cuando la app pasa a segundo plano.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') {
+        clearTimeout(draftTimerRef.current);
+        persistDraft();
+      }
+    });
+    return () => subscription.remove();
+  }, [persistDraft]);
 
   if (loading) {
     return (
@@ -920,7 +1023,13 @@ export default function IndexScreen() {
         >
           {header}
 
-          {statusMsg ? (
+          {draftNotice ? (
+          <View style={styles.noticeBox}>
+            <Text style={styles.statusText}>{draftNotice}</Text>
+          </View>
+        ) : null}
+
+        {statusMsg ? (
             <View style={styles.statusBox}>
               <Text style={styles.statusText}>{statusMsg}</Text>
             </View>
@@ -990,7 +1099,6 @@ export default function IndexScreen() {
         saving={savingSetting}
         onChangeWeeks={handleChangeWeeks}
         catalogCount={catalogCount}
-        sessionsCount={sessionsCount}
         routinesCount={routines.length}
         onNavigate={(path) => router.push(path)}
         onExportBackup={handleExportBackup}
@@ -1080,6 +1188,13 @@ const createStyles = (colors) =>
     backgroundColor: colors.surface,
     borderLeftWidth: 3,
     borderLeftColor: colors.danger,
+    borderRadius: radius.md,
+    padding: spacing.md,
+  },
+  noticeBox: {
+    backgroundColor: colors.surface,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.primary,
     borderRadius: radius.md,
     padding: spacing.md,
   },

@@ -61,6 +61,18 @@ export const SCHEMA_SQL = `
     progression_weeks INTEGER NOT NULL DEFAULT 2 CHECK (progression_weeks IN (1, 2))
   );
 
+  -- Borrador de la sesión en curso: lo que se va cargando antes de finalizar.
+  -- Una fila por día de rutina y fecha; "payload" es JSON (ver src/db/drafts.js).
+  -- Se borra al finalizar y guardar la sesión.
+  CREATE TABLE IF NOT EXISTS workout_drafts (
+    routine_id INTEGER NOT NULL,
+    session_date TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (routine_id, session_date),
+    FOREIGN KEY (routine_id) REFERENCES routines(id) ON DELETE CASCADE
+  );
+
   CREATE INDEX IF NOT EXISTS idx_routine_exercises_order
     ON routine_exercises (routine_id, sort_order);
 

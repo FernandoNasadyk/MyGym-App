@@ -16,6 +16,20 @@ import {
 } from '../src/db/backup.js';
 import { WEIGHT_STEP } from '../src/constants/training.js';
 import {
+  PROGRESS_MODES,
+  buildProgressMessage,
+  getProgressComparison,
+  getProgressPeriods,
+} from '../src/db/progress.js';
+import {
+  applyDraftPayload,
+  buildDraftPayload,
+  clearWorkoutDraft,
+  deleteStaleDrafts,
+  getWorkoutDraft,
+  saveWorkoutDraft,
+} from '../src/db/drafts.js';
+import {
   appendExerciseToDay,
   createExercise,
   deactivateExercise,
@@ -1180,6 +1194,169 @@ test('respaldo: exporta, restaura y deja la base intacta si la copia falla', asy
   await restoreBackup(dst, parseBackup(JSON.stringify(old)));
   assert.equal((await dst.getFirstAsync('SELECT rir FROM set_logs;')).rir, null);
   assert.equal(Number((await dst.getFirstAsync('SELECT initial_weight FROM exercises WHERE id = 1;')).initial_weight), 0);
+});
+
+test('progreso: compara carga máxima, sesiones y arma el mensaje', async () => {
+  const db = createAdapter();
+  await db.execAsync(SCHEMA_SQL);
+  await seedTrainingData(db);
+  const now = new Date(2026, 10, 24); // 24/11/2026
+
+  // Sin datos
+  let result = await getProgressComparison(db, PROGRESS_MODES.WEEK, now);
+  assert.equal(result.sessions.current, 0);
+  assert.equal(buildProgressMessage(result).tone, 'empty');
+
+  // Solo la última semana: faltan datos de referencia
+  await logSession(db, '2026-11-20', 60, 8);
+  result = await getProgressComparison(db, PROGRESS_MODES.WEEK, now);
+  assert.equal(result.hasReference, false);
+  assert.equal(result.counts.new, 1);
+  assert.equal(buildProgressMessage(result).tone, 'start');
+
+  // Semana anterior (17/11 y 14/11 caen en la semana previa: 11/11..17/11)
+  await logSession(db, '2026-11-14', 60, 8);
+  await logSession(db, '2026-11-12', 60, 10, { exerciseId: 2 });
+  await logSession(db, '2026-11-23', 80, 10, { exerciseId: 2 }); // sube 60 -> 80
+  result = await getProgressComparison(db, PROGRESS_MODES.WEEK, now);
+  const press = result.exercises.find((e) => e.id === 1);
+  const squat = result.exercises.find((e) => e.id === 2);
+  assert.equal(press.status, 'same');
+  assert.equal(squat.status, 'up');
+  assert.equal(squat.deltaKg, 20);
+  assert.equal(squat.deltaPct, 33.3);
+  assert.equal(result.counts.up, 1);
+  assert.equal(result.sessions.current, 2);
+  assert.equal(result.sessions.reference, 2);
+  assert.equal(result.exercises[0].id, 2); // lo que subió va primero
+  const message = buildProgressMessage(result);
+  assert.equal(message.tone, 'great');
+  assert.match(message.title, /Subiste carga en 1 ejercicio/);
+  assert.match(message.text, /60 → 80 kg \(\+33,3%\)/);
+
+  // Más repeticiones con el mismo peso: mejora, pero no cuenta como subida de carga
+  await logSession(db, '2026-11-24', 60, 10); // press: 60x10 vs 60x8
+  result = await getProgressComparison(db, PROGRESS_MODES.WEEK, now);
+  assert.equal(result.exercises.find((e) => e.id === 1).status, 'better');
+  assert.equal(result.counts.up, 1);
+
+  // Mes anterior: 4 semanas previas, sesiones como promedio semanal
+  const month = await getProgressComparison(db, PROGRESS_MODES.MONTH, now);
+  assert.equal(month.periods.reference.days, 28);
+  assert.equal(month.sessions.reference, 2);
+  assert.equal(month.sessions.referencePerWeek, 0.5);
+
+  // Períodos: no se pisan entre sí
+  const periods = getProgressPeriods(PROGRESS_MODES.WEEK, now);
+  assert.deepEqual(periods.current, { start: '2026-11-18', end: '2026-11-24', days: 7 });
+  assert.deepEqual(periods.reference, { start: '2026-11-11', end: '2026-11-17', days: 7 });
+});
+
+test('progreso: mensajes sin subida de carga', () => {
+  const base = {
+    sessions: { current: 3, reference: 2, referencePerWeek: 2 },
+    counts: { up: 0, better: 0, same: 2, down: 0, new: 0, comparable: 2 },
+    exercises: [],
+    hasReference: true,
+  };
+  assert.match(buildProgressMessage(base).title, /Constancia/);
+  const maintain = buildProgressMessage({ ...base, sessions: { current: 1, reference: 3, referencePerWeek: 3 } });
+  assert.equal(maintain.tone, 'maintain');
+  const better = buildProgressMessage({
+    ...base,
+    sessions: { current: 1, reference: 3, referencePerWeek: 3 },
+    counts: { ...base.counts, better: 1 },
+  });
+  assert.match(better.title, /mismo peso/);
+});
+
+test('historial: incluye el RIR de cada ejercicio', async () => {
+  const db = createAdapter();
+  await db.execAsync(SCHEMA_SQL);
+  await seedTrainingData(db);
+  await saveWorkout(db, {
+    routineId: 1,
+    date: '2026-11-20',
+    entries: [
+      { exerciseId: 1, rir: 2, sets: [{ weight: '60', reps: '8' }] },
+      { exerciseId: 2, sets: [{ weight: '80', reps: '8' }] },
+    ],
+  });
+  const [session] = await getRecentSessions(db, { limit: 5 });
+  const byId = Object.fromEntries(session.exercises.map((e) => [e.id, e.rir]));
+  assert.equal(byId[1], 2);
+  assert.equal(byId[2], null);
+});
+
+test('borrador: se guarda, se recupera tras reabrir y se limpia al finalizar', async () => {
+  const db = createAdapter();
+  await db.execAsync(SCHEMA_SQL);
+  await seedTrainingData(db);
+
+  const exercises = [{ id: 1 }, { id: 2 }];
+  const initial = buildInitialDrafts(
+    [{ id: 1, default_sets: 2 }, { id: 2, default_sets: 2 }],
+    new Map(),
+    new Map()
+  );
+
+  // Sin borrador
+  assert.equal(await getWorkoutDraft(db, 1, '2026-11-24'), null);
+
+  // La persona carga datos: se guardan
+  const edited = {
+    ...initial,
+    1: [{ weight: '60', reps: '8' }, { weight: '60', reps: '7' }, { weight: '55', reps: '' }],
+  };
+  const payload = buildDraftPayload(exercises, edited, { 1: 2, 2: null });
+  await saveWorkoutDraft(db, { routineId: 1, date: '2026-11-24', payload });
+  await saveWorkoutDraft(db, { routineId: 1, date: '2026-11-24', payload }); // actualiza, no duplica
+  assert.equal((await db.getAllAsync('SELECT * FROM workout_drafts;')).length, 1);
+
+  // "Reabrir la app": se lee de la base y se aplica sobre lo inicial
+  const draft = await getWorkoutDraft(db, 1, '2026-11-24');
+  const applied = applyDraftPayload(exercises, initial, { 1: null, 2: null }, draft);
+  assert.equal(applied.restored, true);
+  assert.deepEqual(applied.drafts[1], edited[1]);
+  assert.deepEqual(applied.drafts[2], initial[2]);
+  assert.equal(applied.rirByExercise[1], 2);
+  assert.equal(applied.rirByExercise[2], null);
+
+  // Un ejercicio que ya no está en la rutina se ignora
+  assert.deepEqual(
+    applyDraftPayload([{ id: 2 }], initial, {}, draft).drafts[2],
+    initial[2]
+  );
+  // Borrador dañado o de otro día: no rompe
+  await db.runAsync("UPDATE workout_drafts SET payload = 'no es json';");
+  assert.equal(await getWorkoutDraft(db, 1, '2026-11-24'), null);
+  assert.equal(await getWorkoutDraft(db, 1, '2026-11-25'), null);
+  await saveWorkoutDraft(db, { routineId: 1, date: '2026-11-24', payload });
+
+  // Finalizar y guardar la sesión borra el borrador en la misma operación
+  await saveWorkout(db, {
+    routineId: 1,
+    date: '2026-11-24',
+    entries: buildWorkoutEntries(exercises, edited, { 1: 2 }),
+  });
+  assert.equal(await getWorkoutDraft(db, 1, '2026-11-24'), null);
+  assert.equal((await db.getAllAsync('SELECT * FROM workout_drafts;')).length, 0);
+
+  // Limpieza manual y de borradores viejos
+  await saveWorkoutDraft(db, { routineId: 1, date: '2026-11-20', payload });
+  await saveWorkoutDraft(db, { routineId: 1, date: '2026-11-24', payload });
+  await deleteStaleDrafts(db, '2026-11-22');
+  assert.deepEqual(
+    (await db.getAllAsync('SELECT session_date FROM workout_drafts;')).map((r) => r.session_date),
+    ['2026-11-24']
+  );
+  await clearWorkoutDraft(db, 1, '2026-11-24');
+  assert.equal((await db.getAllAsync('SELECT * FROM workout_drafts;')).length, 0);
+
+  // Si se borra la rutina, el borrador se va con ella
+  await saveWorkoutDraft(db, { routineId: 1, date: '2026-11-24', payload });
+  await db.runAsync('DELETE FROM routines WHERE id = 1;');
+  assert.equal((await db.getAllAsync('SELECT * FROM workout_drafts;')).length, 0);
 });
 
 async function main() {

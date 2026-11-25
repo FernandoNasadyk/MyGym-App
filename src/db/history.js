@@ -31,7 +31,7 @@ function normalizeOptions(options) {
  * {
  *   id, routineId, routineName, date, notes,
  *   setCount, volume,
- *   exercises: [{ id, name, volume, sets: [{ setNumber, weight, reps }] }]
+ *   exercises: [{ id, name, volume, rir, sets: [{ setNumber, weight, reps }] }]
  * }
  *
  * Opciones: { limit, offset, exerciseId }.
@@ -74,7 +74,7 @@ export async function getRecentSessions(db, options = {}) {
 
   const rows = await db.getAllAsync(
     `SELECT sl.session_id, sl.exercise_id, e.name AS exercise_name,
-            sl.set_number, sl.weight, sl.reps,
+            sl.set_number, sl.weight, sl.reps, sl.rir,
             COALESCE(re.sort_order, 9999) AS day_order
      FROM set_logs sl
      INNER JOIN workout_sessions ws ON ws.id = sl.session_id
@@ -114,6 +114,7 @@ export async function getRecentSessions(db, options = {}) {
         id: exerciseIdRow,
         name: row.exercise_name,
         volume: 0,
+        rir: null,
         sets: [],
       };
       session.exercises.push(exercise);
@@ -128,6 +129,9 @@ export async function getRecentSessions(db, options = {}) {
       weight,
       reps,
     });
+    if (exercise.rir === null && row.rir != null) {
+      exercise.rir = Number(row.rir);
+    }
     exercise.volume += setVolume;
     session.volume += setVolume;
     session.setCount += 1;

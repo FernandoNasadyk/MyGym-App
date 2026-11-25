@@ -19,7 +19,6 @@ import { radius, spacing } from '../constants/app-theme';
 import ScreenHeader from '../components/screen-header';
 import {
   formatRelativeDate,
-  formatVolume,
   formatWeekdayShort,
   formatWeight,
   getDateBadgeParts,
@@ -84,12 +83,13 @@ export default function HistoryScreen() {
       setFilterOptions(options);
       setSessions(page);
       setTotals(summaryTotals);
-      setExpandedId((current) => {
-        if (current && page.some((session) => session.id === current)) {
-          return current;
-        }
-        return page[0]?.id ?? null;
-      });
+      // Las sesiones se muestran contraídas; solo se conserva la que la
+      // persona ya había abierto si sigue en la lista.
+      setExpandedId((current) =>
+        current && page.some((session) => session.id === current)
+          ? current
+          : null
+      );
     } catch (err) {
       if (requestId !== requestRef.current) return;
       console.error('Error cargando historial:', err);
@@ -104,6 +104,8 @@ export default function HistoryScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      // Al entrar al historial todas las sesiones arrancan contraídas.
+      setExpandedId(null);
       loadFirstPage(exerciseIdRef.current);
     }, [loadFirstPage])
   );
@@ -286,8 +288,6 @@ export default function HistoryScreen() {
               <StatBlock label="Sesiones" value={totals.sessions} />
               <View style={styles.summaryDivider} />
               <StatBlock label="Series" value={totals.sets} />
-              <View style={styles.summaryDivider} />
-              <StatBlock label="Volumen" value={formatVolume(totals.volume)} />
               {selectedExercise ? (
                 <>
                   <View style={styles.summaryDivider} />
@@ -342,9 +342,6 @@ export default function HistoryScreen() {
                           {session.setCount}{' '}
                           {session.setCount === 1 ? 'serie' : 'series'}
                         </Text>
-                        <Text style={styles.sessionVolume}>
-                          {formatVolume(session.volume)} de volumen
-                        </Text>
                       </View>
 
                       <Text
@@ -371,9 +368,11 @@ export default function HistoryScreen() {
                               >
                                 {exercise.name}
                               </Text>
-                              <Text style={styles.exerciseMeta}>
-                                {formatVolume(exercise.volume)}
-                              </Text>
+                              {exercise.rir != null ? (
+                                <Text style={styles.exerciseMeta}>
+                                  RIR {exercise.rir}
+                                </Text>
+                              ) : null}
                             </View>
 
                             <View style={styles.setsRow}>
@@ -617,11 +616,6 @@ const createStyles = (colors) =>
     color: colors.textMuted,
     fontSize: 11.5,
     lineHeight: 16,
-  },
-  sessionVolume: {
-    color: colors.primaryText,
-    fontSize: 11,
-    fontWeight: '700',
   },
   chevron: {
     color: colors.textFaint,

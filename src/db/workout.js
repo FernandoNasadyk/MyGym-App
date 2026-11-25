@@ -387,6 +387,12 @@ export async function saveWorkout(
       }
     }
 
+    // La sesión quedó guardada: el borrador ya no hace falta.
+    await db.runAsync(
+      'DELETE FROM workout_drafts WHERE routine_id = ? AND session_date = ?;',
+      [routineId, date]
+    );
+
     summary = {
       sessionId: Number(sessionId),
       setCount,

@@ -74,7 +74,7 @@ scripts/test-db.mjs      tests con node:sqlite
 ## Chequeos
 
 ```bash
-npm run test:db     # 28 tests de días, entrenamiento, progresión, RIR, migraciones, respaldo, historial y formato
+npm run test:db     # 32 tests de días, entrenamiento, progresión, RIR, borrador, progreso, respaldo, historial y formato
 npx tsc --noEmit    # typecheck (también revisa la sintaxis de los .jsx)
 ```
 
@@ -92,3 +92,12 @@ npx tsc --noEmit    # typecheck (también revisa la sintaxis de los .jsx)
 - **Respaldo**: Ajustes → Respaldo → *Exportar* comparte un texto JSON con todos los datos
   (sin internet ni cuenta); *Restaurar* pide pegar ese texto, muestra qué contiene y reemplaza
   los datos actuales en una transacción (si falla, no se modifica nada).
+
+## Progreso y borrador
+
+- **Progreso y comparativas** (Ajustes): últimos 7 días vs. semana anterior o mes anterior (4 semanas
+  previas), con foco en la carga máxima real por ejercicio. Las barras están hechas con `View`, sin librerías
+  de gráficos.
+- **Borrador automático**: lo que cargás en la rutina del día se guarda en `workout_drafts` (SQLite) al
+  editar y al pasar a segundo plano, y se recupera aunque cierres la app por completo. Se borra al finalizar
+  la sesión.

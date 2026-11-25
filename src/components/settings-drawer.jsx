@@ -46,7 +46,6 @@ export default function SettingsDrawer({
   saving,
   onChangeWeeks,
   catalogCount,
-  sessionsCount,
   routinesCount = 0,
   onNavigate,
   onExportBackup,
@@ -114,10 +113,15 @@ export default function SettingsDrawer({
               <NavRow
                 glyph="↺"
                 title="Historial de sesiones"
-                subtitle={`${sessionsCount} ${
-                  sessionsCount === 1 ? 'sesión' : 'sesiones'
-                } · filtrá por ejercicio`}
+                subtitle="Revisá tus sesiones · filtrá por ejercicio"
                 onPress={() => navigateTo('/history')}
+              />
+              <View style={styles.divider} />
+              <NavRow
+                glyph="▲"
+                title="Progreso y comparativas"
+                subtitle="Tu carga real: semana vs. semana o mes anterior"
+                onPress={() => navigateTo('/progress')}
               />
               <View style={styles.divider} />
               <NavRow
@@ -136,7 +140,7 @@ export default function SettingsDrawer({
               <Text style={styles.cardTitle}>Ventana para subir peso</Text>
               <Text style={styles.cardHint}>
                 Cuántas semanas tienen que pasar con el mismo peso, llegando al
-                máximo de repeticiones, para que la app te sugiera subir 2,5 kg.
+                máximo de repeticiones, para que la app te sugiera subir de peso.
               </Text>
 
               <View style={styles.options}>
@@ -173,8 +177,7 @@ export default function SettingsDrawer({
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Tema</Text>
               <Text style={styles.cardHint}>
-                Elegí entre modo claro u oscuro. Los dos mantienen la identidad
-                verde de la app.
+                Elegí entre modo claro u oscuro.
               </Text>
 
               <View style={styles.options}>
@@ -248,21 +251,13 @@ export default function SettingsDrawer({
             <Text style={styles.sectionLabel}>Datos</Text>
 
             <View style={styles.card}>
-              <View style={styles.infoRow}>
-                <Text style={styles.infoValue}>{sessionsCount}</Text>
-                <Text style={styles.infoLabel}>
-                  {sessionsCount === 1
-                    ? 'sesión registrada'
-                    : 'sesiones registradas'}
-                </Text>
-              </View>
               <Text style={styles.cardHint}>
-                Todo se guarda en tu teléfono, en una base SQLite local. No hace
+                Todo se guarda en tu teléfono. No hace
                 falta internet ni cuenta.
               </Text>
             </View>
 
-            <Text style={styles.footer}>My Gym · v1.0.0</Text>
+            <Text style={styles.footer}>My Gym · v1.1.0</Text>
           </ScrollView>
         </SafeAreaView>
       </View>
@@ -431,21 +426,6 @@ const createStyles = (colors) =>
   },
   optionTextActive: {
     color: colors.primaryText,
-  },
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 8,
-  },
-  infoValue: {
-    color: colors.primary,
-    fontSize: 24,
-    fontWeight: '800',
-  },
-  infoLabel: {
-    color: colors.textSecondary,
-    fontSize: 12,
-    fontWeight: '600',
   },
   footer: {
     color: colors.textFaint,
